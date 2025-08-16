@@ -1,4 +1,9 @@
-# FileSys - Filesystem Explorer
+# FileSystem - Filesystem Explorer
+
+> ⚠️ **Note**: The system currently **crashes frequently** if you try to mount an actual filesystem  
+(file pointer errors and segmentation faults).  
+It works reliably only with the **virtual filesystem** implemented inside the project.
+
 
 A modular Qt/C++ filesystem explorer that allows users to interact with both local (.fs) and external filesystems (USB drives, hard drives, SD cards, optical media).
 
