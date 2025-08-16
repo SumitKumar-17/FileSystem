@@ -13,13 +13,13 @@
 #include <QCalendarWidget>
 #include <QDialogButtonBox>
 #include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
 #include <QLabel>
 #include <QSpinBox>
 #include <QComboBox>
 #include <QTableWidget>
 #include <QFileInfo>
+#include <QFormLayout>
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
                                           ui(new Ui::MainWindow)
@@ -395,6 +395,10 @@ void MainWindow::checkAvailableFilesystems()
     filters << "*.fs";
     QStringList fileList = dir.entryList(filters, QDir::Files);
     
+    // Log the current directory and files found
+    qDebug() << "Checking for filesystems in directory: " << QDir::currentPath();
+    qDebug() << "Found files: " << fileList;
+    
     // Update only if the list has changed
     if (fileList != availableFilesystems) {
         availableFilesystems = fileList;
@@ -418,8 +422,19 @@ void MainWindow::on_actionDetectFilesystems_triggered()
     checkAvailableFilesystems();
     
     if (availableFilesystems.isEmpty()) {
+        QString currentDir = QDir::currentPath();
         QMessageBox::information(this, "No Filesystems Found", 
-                               "No filesystem images (*.fs) were found in the current directory.");
+                               "No filesystem images (*.fs) were found in the current directory:\n" + 
+                               currentDir + "\n\n" +
+                               "The default filesystem 'my_virtual_disk.fs' should be available after formatting.");
+                               
+        // Check if our default filesystem exists
+        QFileInfo check_file("my_virtual_disk.fs");
+        if (check_file.exists() && check_file.isFile()) {
+            QMessageBox::information(this, "Default Filesystem Available", 
+                                  "The default filesystem 'my_virtual_disk.fs' is available.\n"
+                                  "You can mount it directly using the 'Mount File System' button.");
+        }
         return;
     }
     

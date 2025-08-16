@@ -49,64 +49,30 @@ void SnapshotManager::copy_blocks(const Inode& src_inode, int dest_inode_num) {
     // Copy direct blocks
     for (int i = 0; i < 10; i++) {
         if (src_inode.direct_blocks[i] != 0) {
-            // Allocate new block - using private method via friend class or public API
-            // For now, we'll use a placeholder that returns -1
-            int new_block = -1; // Would be fs->allocate_block() in a real implementation
+            // For a full implementation, we would:
+            // 1. Allocate a new block
+            // 2. Copy data from source to new block
+            // 3. Update the destination inode
             
-            if (new_block != -1) {
-                char buffer[BLOCK_SIZE];
-                fs->read_block(src_inode.direct_blocks[i], buffer);
-                // Write to the new block - would use fs->write_block in full implementation
-                // fs->write_block(new_block, buffer);
-                
-                // Update destination inode
-                dest_inode.direct_blocks[i] = new_block;
-            }
+            // For now, we'll directly copy the block reference
+            // This is not a true "snapshot" since blocks are shared
+            dest_inode.direct_blocks[i] = src_inode.direct_blocks[i];
         }
     }
     
     // Copy indirect block if present
     if (src_inode.indirect_block != 0) {
-        // Allocate new indirect block
-        int new_indirect_block = -1; // Would be fs->allocate_block() in a real implementation
-        
-        if (new_indirect_block != -1) {
-            char indirect_buffer[BLOCK_SIZE];
-            fs->read_block(src_inode.indirect_block, indirect_buffer);
-            int* block_pointers = (int*)indirect_buffer;
-            int pointers_per_block = BLOCK_SIZE / sizeof(int);
-            
-            // Copy each referenced block
-            for (int i = 0; i < pointers_per_block; i++) {
-                if (block_pointers[i] != 0) {
-                    // Allocate new block
-                    int new_block = -1; // Would be fs->allocate_block() in a real implementation
-                    
-                    if (new_block != -1) {
-                        char buffer[BLOCK_SIZE];
-                        fs->read_block(block_pointers[i], buffer);
-                        // Write to the new block
-                        // fs->write_block(new_block, buffer);
-                        
-                        // Update indirect block
-                        block_pointers[i] = new_block;
-                    }
-                }
-            }
-            
-            // Write updated indirect block
-            // fs->write_block(new_indirect_block, indirect_buffer);
-            
-            // Update destination inode
-            dest_inode.indirect_block = new_indirect_block;
-        }
+        // In a full implementation, we'd allocate a new block
+        // and copy all the data. For now, we'll share the indirect block.
+        dest_inode.indirect_block = src_inode.indirect_block;
     }
     
     // Update destination inode size and other metadata
     dest_inode.size = src_inode.size;
     
-    // We would need a method to write back the inode
-    // fs->update_inode(dest_inode_num, dest_inode);
+    // Write back inode changes
+    // In a full implementation, we'd need a method to update the inode
+    // For now, we can't do this without more access to the filesystem internals
 }
 
 void SnapshotManager::copy_directory(int src_dir_inode, int dest_dir_inode) {
