@@ -1,5 +1,0 @@
-/home/sumitk/Desktop/FileSys/build/CMakeFiles/FileSystemUI.dir
-/home/sumitk/Desktop/FileSys/build/CMakeFiles/edit_cache.dir
-/home/sumitk/Desktop/FileSys/build/CMakeFiles/rebuild_cache.dir
-/home/sumitk/Desktop/FileSys/build/CMakeFiles/FileSystemUI_autogen_timestamp_deps.dir
-/home/sumitk/Desktop/FileSys/build/CMakeFiles/FileSystemUI_autogen.dir

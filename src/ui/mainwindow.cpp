@@ -1,4 +1,3 @@
-
 #include "ui/mainwindow.h"
 #include "ui_mainwindow.h"
 #include <QMessageBox>
@@ -98,7 +97,8 @@ void MainWindow::on_fileListWidget_itemDoubleClicked(QListWidgetItem *item)
     else
     {
         current_open_file = name;
-        ui->fileContentTextEdit->setPlainText(QString::fromStdString(fs->read(name)));
+        std::string content = fs->read(name);
+        ui->fileContentTextEdit->setPlainText(QString::fromStdString(content));
     }
 }
 
@@ -115,7 +115,9 @@ void MainWindow::on_saveButton_clicked()
 void MainWindow::on_mkdirButton_clicked()
 {
     bool ok;
-    QString text = QInputDialog::getText(this, "Create Directory", "Directory name:", QLineEdit::Normal, "", &ok);
+    QString text = QInputDialog::getText(this, tr("Create Directory"),
+                                         tr("Directory name:"), QLineEdit::Normal,
+                                         "", &ok);
     if (ok && !text.isEmpty())
     {
         fs->mkdir(text.toStdString());
@@ -126,7 +128,9 @@ void MainWindow::on_mkdirButton_clicked()
 void MainWindow::on_createFileButton_clicked()
 {
     bool ok;
-    QString text = QInputDialog::getText(this, "Create File", "File name:", QLineEdit::Normal, "", &ok);
+    QString text = QInputDialog::getText(this, tr("Create File"),
+                                         tr("File name:"), QLineEdit::Normal,
+                                         "", &ok);
     if (ok && !text.isEmpty())
     {
         fs->create(text.toStdString());

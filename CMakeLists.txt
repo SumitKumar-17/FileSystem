@@ -22,3 +22,6 @@ add_executable(FileSystemUI
 
 # --- Link Libraries ---
 target_link_libraries(FileSystemUI PRIVATE Qt::Widgets)
+
+# Add the header with Q_OBJECT to the sources to ensure AUTOMOC processes it.
+target_sources(FileSystemUI PRIVATE include/ui/mainwindow.h)

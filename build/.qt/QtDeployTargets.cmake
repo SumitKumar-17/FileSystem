@@ -1,2 +1,0 @@
-set(__QT_DEPLOY_TARGET_FileSystemUI_FILE /home/sumitk/Desktop/FileSys/build/FileSystemUI)
-set(__QT_DEPLOY_TARGET_FileSystemUI_TYPE EXECUTABLE)
