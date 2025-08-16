@@ -17,7 +17,7 @@ add_executable(FileSystemUI
     src/main.cpp
     src/core/filesystem.cpp
     src/ui/mainwindow.cpp
-    # You would also list your mainwindow.ui file here
+    src/ui/mainwindow.ui # Explicitly add the UI file
 )
 
 # --- Link Libraries ---

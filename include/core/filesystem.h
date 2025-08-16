@@ -21,7 +21,7 @@ struct Superblock {
 
 // Inode structure
 struct Inode {
-    int mode; // 0 for free, 1 for file, 2 for directory
+    int mode; 
     int size;
     int direct_blocks[10];
     int indirect_block;
@@ -33,7 +33,6 @@ struct DirEntry {
     int inode_num;
 };
 
-// FileSystem class Declaration
 class FileSystem {
 private:
     std::fstream disk;
@@ -42,7 +41,6 @@ private:
     std::vector<Inode> inodes;
     int current_dir_inode;
 
-    // Helper function declarations
     void write_block(int block_num, const char* data);
     void read_block(int block_num, char* data);
     void write_superblock();
@@ -58,7 +56,6 @@ public:
     FileSystem(const std::string& name);
     ~FileSystem();
 
-    // Public API for file system operations
     void format();
     bool mount();
     void unmount();
@@ -71,7 +68,6 @@ public:
     void write(const std::string& filename, const std::string& data);
     std::string read(const std::string& filename);
     
-    // Getter for inode info, useful for UI
     Inode get_inode(int inode_num) const;
 };
 
