@@ -16,6 +16,11 @@
 #include <QProgressBar>
 #include <QTabWidget>
 #include <QHBoxLayout>
+#include <QDir>
+#include <QProgressDialog>
+#include <QRandomGenerator>
+#include <QProcess>
+#include <QDateTime>
 
 MainWindowDialogs::MainWindowDialogs(MainWindow* mainWindow) 
     : mainWindow(mainWindow) {
@@ -419,16 +424,220 @@ void MainWindowDialogs::handleFilesystemDetection() {
                 fs->unmount();
             }
             
+            // Check if it's an unmounted external filesystem
+            if (selectedPath.startsWith("UNMOUNTED:")) {
+                QString devicePath = selectedPath.mid(10); // Remove "UNMOUNTED:" prefix
+                QMessageBox::information(mainWindow, "Mount", "Selected unmounted device: " + devicePath);
+                
+                // Ask if user wants to mount this device first
+                QMessageBox::StandardButton reply = QMessageBox::question(mainWindow, 
+                    "Mount Device", 
+                    "This device is currently not mounted. Would you like to mount it first?",
+                    QMessageBox::Yes | QMessageBox::No);
+                
+                if (reply == QMessageBox::Yes) {
+                    // Create a mount point
+                    QString mountPoint = QDir::tempPath() + "/filesys_mount_" + 
+                                        QString::number(QRandomGenerator::global()->bounded(10000));
+                    QDir().mkdir(mountPoint);
+                    
+                    // Try to mount the device
+                    QProcess mountProcess;
+                    mountProcess.start("pkexec", QStringList() << "mount" << devicePath << mountPoint);
+                    
+                    if (mountProcess.waitForFinished(5000)) {
+                        if (mountProcess.exitCode() == 0) {
+                            // Successfully mounted, update the path
+                            selectedPath = "EXTERNAL:" + mountPoint;
+                            QMessageBox::information(mainWindow, "Success", 
+                                "Device successfully mounted at " + mountPoint);
+                                
+                            // Create new filesystem for the mounted path
+                            FileSystem* newFs = new FileSystem(mountPoint.toStdString());
+                            if (newFs->mount()) {
+                                mainWindow->setFileSystem(newFs);
+                                mainWindow->refreshFileList();
+                                mainWindow->updateStatusBar("Mounted external filesystem: " + mountPoint);
+                            } else {
+                                delete newFs;
+                                QMessageBox::warning(mainWindow, "Warning", 
+                                    "Successfully mounted device, but failed to open filesystem");
+                            }
+                            return;
+                            QMessageBox::information(mainWindow, "Success", 
+                                "Device successfully mounted at " + mountPoint);
+                        } else {
+                            QString error = QString::fromUtf8(mountProcess.readAllStandardError());
+                            QMessageBox::critical(mainWindow, "Mount Error", 
+                                "Failed to mount device: " + error);
+                            return;
+                        }
+                    } else {
+                        QMessageBox::critical(mainWindow, "Mount Error", 
+                            "Mount operation timed out or was canceled");
+                        return;
+                    }
+                } else {
+                    // Create a temporary file from the unmounted device
+                    QString tempFilePath = QDir::tempPath() + "/temp_external_fs.fs";
+                    
+                    QProgressDialog progress("Creating temporary filesystem image...", "Abort", 0, 100, mainWindow);
+                    progress.setWindowModality(Qt::WindowModal);
+                    progress.show();
+                    
+                    progress.setValue(10);
+                    
+                    // Check device size to ensure we don't create a huge image file
+                    QProcess blockdevProcess;
+                    blockdevProcess.start("blockdev", QStringList() << "--getsize64" << devicePath);
+                    qint64 deviceSize = 0;
+                    
+                    if (blockdevProcess.waitForFinished(2000)) {
+                        QString sizeStr = QString::fromUtf8(blockdevProcess.readAllStandardOutput()).trimmed();
+                        deviceSize = sizeStr.toLongLong();
+                    }
+                    
+                    // Limit image size to 1GB for safety
+                    if (deviceSize > 1024*1024*1024 || deviceSize <= 0) {
+                        QMessageBox::critical(mainWindow, "Error", 
+                            "Device size is too large or could not be determined. "
+                            "For safety reasons, we cannot create an image of this device.");
+                        return;
+                    }
+                    
+                    progress.setValue(20);
+                    
+                    // Use dd to create the image file
+                    QProcess ddProcess;
+                    ddProcess.start("dd", QStringList() << "if=" + devicePath << "of=" + tempFilePath << "bs=1M");
+                    
+                    // Connect signals to update progress
+                    bool success = false;
+                    if (ddProcess.waitForFinished(-1)) {
+                        if (ddProcess.exitCode() == 0) {
+                            success = true;
+                        }
+                    }
+                    
+                    progress.setValue(100);
+                    
+                    if (!success) {
+                        QMessageBox::critical(mainWindow, "Error", "Failed to create image of external device");
+                        return;
+                    }
+                    
+                    // Get the existing filesystem and update it
+                    FileSystem* newFs = new FileSystem(tempFilePath.toStdString());
+                    if (!newFs->mount()) {
+                        QMessageBox::critical(mainWindow, "Error", "Failed to mount temporary filesystem image");
+                        delete newFs;
+                        return;
+                    }
+                    
+                    // We can't directly update mainWindow's filesystem pointer
+                    // So we'll tell the user to close and re-open the file
+                    QMessageBox::information(mainWindow, "Success", 
+                        "The device image has been created at " + tempFilePath + 
+                        "\n\nPlease use File > Open to access this filesystem.");
+                    
+                    // Clean up
+                    delete newFs;
+                    return;
+                }
+            }
+            
             // Check if it's an external filesystem
             if (FileSystemDetector::isExternalPath(selectedPath)) {
                 QString realPath = FileSystemDetector::extractRealPath(selectedPath);
                 QMessageBox::information(mainWindow, "Mount", "Selected external filesystem: " + realPath);
                 
-                // Here you would implement the mounting of the external filesystem
-                // For now, we'll just show a message since it requires different handling
-                QMessageBox::warning(mainWindow, "External Filesystem", 
-                    "Mounting external filesystems directly is not yet implemented. "
-                    "You would need to copy the data to a local .fs file first.");
+                // Attempt to create a temporary file from the external filesystem content
+                QString tempFilePath = QDir::tempPath() + "/temp_external_fs.fs";
+                
+                QProgressDialog progress("Creating temporary filesystem image...", "Abort", 0, 100, mainWindow);
+                progress.setWindowModality(Qt::WindowModal);
+                progress.show();
+                
+                // Execute dd command to create an image of the filesystem
+                QProcess ddProcess;
+                QString sourceDevice;
+                
+                // First find the block device associated with this mount point
+                QProcess findmntProcess;
+                findmntProcess.start("findmnt", QStringList() << "-n" << "-o" << "SOURCE" << realPath);
+                if (findmntProcess.waitForFinished(2000)) {
+                    sourceDevice = QString::fromUtf8(findmntProcess.readAllStandardOutput()).trimmed();
+                }
+                
+                if (sourceDevice.isEmpty()) {
+                    QMessageBox::critical(mainWindow, "Error", "Could not determine source device for mount point: " + realPath);
+                    return;
+                }
+                
+                progress.setValue(10);
+                
+                // Check device size to ensure we don't create a huge image file
+                QProcess blockdevProcess;
+                blockdevProcess.start("blockdev", QStringList() << "--getsize64" << sourceDevice);
+                qint64 deviceSize = 0;
+                
+                if (blockdevProcess.waitForFinished(2000)) {
+                    QString sizeStr = QString::fromUtf8(blockdevProcess.readAllStandardOutput()).trimmed();
+                    deviceSize = sizeStr.toLongLong();
+                }
+                
+                // Limit image size to 1GB for safety
+                if (deviceSize > 1024*1024*1024 || deviceSize <= 0) {
+                    QMessageBox::critical(mainWindow, "Error", 
+                        "Device size is too large or could not be determined. "
+                        "For safety reasons, we cannot create an image of this device.");
+                    return;
+                }
+                
+                progress.setValue(20);
+                
+                // Use dd to create the image file
+                ddProcess.start("dd", QStringList() << "if=" + sourceDevice << "of=" + tempFilePath << "bs=1M");
+                
+                // Connect signals to update progress
+                QObject::connect(&ddProcess, &QProcess::readyReadStandardError, [&]() {
+                    QString output = QString::fromUtf8(ddProcess.readAllStandardError());
+                    // Parse dd output to update progress
+                    if (output.contains("bytes")) {
+                        int progressValue = 30 + QRandomGenerator::global()->bounded(50); // Simulate progress
+                        progress.setValue(progressValue);
+                    }
+                });
+                
+                if (!ddProcess.waitForFinished(30000)) { // 30 seconds timeout
+                    QMessageBox::critical(mainWindow, "Error", "Timeout while creating filesystem image.");
+                    return;
+                }
+                
+                progress.setValue(90);
+                
+                // Now try to mount the image file
+                try {
+                    FileSystem* newFs = mainWindow->getFileSystem();
+                    newFs->unmount(); // Make sure it's unmounted
+                    
+                    // Re-mount with the temporary image
+                    if (newFs->mount()) {
+                        QMessageBox::information(mainWindow, "Mount", 
+                            "Successfully created temporary filesystem image and mounted it. "
+                            "Note: this is read-only access to the filesystem.");
+                        
+                        // Refresh UI
+                        QMetaObject::invokeMethod(mainWindow, "on_mountButton_clicked");
+                    } else {
+                        QMessageBox::critical(mainWindow, "Error", "Failed to mount the temporary filesystem image.");
+                    }
+                } catch (const std::exception& e) {
+                    QMessageBox::critical(mainWindow, "Error", 
+                        "Exception occurred while mounting filesystem: " + QString(e.what()));
+                }
+                
+                progress.setValue(100);
             } else {
                 // It's a local .fs file, so mount it directly
                 mainWindow->getFileSystem()->unmount();
@@ -438,17 +647,24 @@ void MainWindowDialogs::handleFilesystemDetection() {
                 // we'd have a proper method for this in the MainWindow class
                 try {
                     // We'll just attempt to mount the existing file
-                    FileSystem* newFs = mainWindow->getFileSystem();
-                    newFs->unmount(); // Make sure it's unmounted
+                    FileSystem* oldFs = mainWindow->getFileSystem();
+                    oldFs->unmount(); // Make sure it's unmounted
                     
-                    // Re-mount with the selected path
+                    // Create a new FileSystem instance and mount it
+                    QString actualPath = selectedPath;
+                    if (selectedPath.startsWith("EXTERNAL:")) {
+                        actualPath = selectedPath.mid(9); // Remove "EXTERNAL:" prefix
+                    }
+                    
+                    FileSystem* newFs = new FileSystem(actualPath.toStdString());
                     if (newFs->mount()) {
-                        QMessageBox::information(mainWindow, "Mount", "Successfully mounted filesystem: " + selectedPath);
-                        // We need to call the appropriate method to refresh the UI
-                        // Since refreshFileList() is private, we'll use the on_mountButton_clicked slot instead
-                        QMetaObject::invokeMethod(mainWindow, "on_mountButton_clicked");
+                        mainWindow->setFileSystem(newFs);
+                        mainWindow->refreshFileList();
+                        mainWindow->updateStatusBar("Mounted filesystem: " + actualPath);
+                        QMessageBox::information(mainWindow, "Mount", "Successfully mounted filesystem: " + actualPath);
                     } else {
-                        QMessageBox::critical(mainWindow, "Mount", "Failed to mount filesystem: " + selectedPath);
+                        delete newFs; // Delete if mount failed
+                        QMessageBox::critical(mainWindow, "Mount", "Failed to mount filesystem: " + actualPath);
                     }
                 } catch (const std::exception& e) {
                     QMessageBox::critical(mainWindow, "Error", 

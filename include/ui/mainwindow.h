@@ -31,6 +31,14 @@ public:
     // Accessor for the FileSystem object
     FileSystem* getFileSystem() { return fs.get(); }
     
+    // Method to set a new FileSystem
+    void setFileSystem(FileSystem* newFs) { 
+        fs.reset(newFs); 
+    }
+    
+    // Update status bar with a message
+    void updateStatusBar(const QString &message);
+    
     // Accessor for the UI
     Ui::MainWindow* getUI() { return ui; }
     
@@ -44,6 +52,9 @@ public:
     // Accessor for current open file
     std::string getCurrentOpenFile() { return current_open_file; }
     void setCurrentOpenFile(const std::string& path) { current_open_file = path; }
+    
+    // UI operations that need to be accessible to other classes
+    void refreshFileList();
 
 private slots:
     void on_formatButton_clicked();
@@ -61,7 +72,6 @@ private slots:
     void on_actionDetectFilesystems_triggered();
     void on_searchButton_clicked();
     void checkAvailableFilesystems();
-    void refreshFileList();
     void updateAvailableFilesystemsList();
     void onDirectorySelected(const std::string &path);
     void refreshTreeView();

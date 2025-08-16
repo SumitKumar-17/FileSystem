@@ -8,6 +8,7 @@
 #include <QMimeData>
 #include <QFileInfo>
 #include <QStyle>
+#include <string.h>  // For strnlen
 
 MainWindowFileOps::MainWindowFileOps(MainWindow* mainWindow) 
     : mainWindow(mainWindow) {
@@ -178,16 +179,33 @@ void MainWindowFileOps::refreshFileList() {
     
     // Add entries to the list
     for (const auto &entry : entries) {
-        if (std::string(entry.name) == "." || std::string(entry.name) == "..") 
+        // Create a std::string using the entry name and ensure it's properly terminated
+        std::string nameStr(entry.name, strnlen(entry.name, MAX_FILENAME_LENGTH));
+        
+        if (nameStr == "." || nameStr == "..") 
             continue;
+        
+        // Check if the name contains only valid UTF-8 characters
+        QString entryName = QString::fromUtf8(nameStr.c_str());
+        if (entryName.isEmpty() && !nameStr.empty()) {
+            // If conversion fails, fallback to Latin1 encoding
+            entryName = QString::fromLatin1(nameStr.c_str());
+            // If still problematic, provide a placeholder name with the inode number
+            if (entryName.contains(QChar(QChar::ReplacementCharacter))) {
+                entryName = QString("File-%1").arg(entry.inode_num);
+            }
+        }
             
+        // Get the inode and determine if it's a directory or file
         Inode inode = fs->get_inode(entry.inode_num);
-        QString prefix = (inode.mode == 2) ? "[D] " : "[F] ";
-        QListWidgetItem *item = new QListWidgetItem(prefix + QString::fromStdString(entry.name));
+        bool isDirectory = (inode.mode == 2);
+        QString prefix = isDirectory ? "[D] " : "[F] ";
+        
+        QListWidgetItem *item = new QListWidgetItem(prefix + entryName);
         item->setData(Qt::UserRole, entry.inode_num);
         
         // Set icon based on file type
-        if (inode.mode == 2) { // Directory
+        if (isDirectory) {
             item->setIcon(ui->fileListWidget->style()->standardIcon(QStyle::SP_DirIcon));
         } else {
             item->setIcon(ui->fileListWidget->style()->standardIcon(QStyle::SP_FileIcon));

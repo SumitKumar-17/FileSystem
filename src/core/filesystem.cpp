@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <dirent.h> // For directory operations
 #include <sys/stat.h> // For file stats
+#include <QDebug>   // For debug messages
 FileSystem::FileSystem(const std::string& name) : disk_name(name), current_dir_inode(0), journal(nullptr) {}
 
 FileSystem::~FileSystem() {
@@ -75,7 +76,19 @@ void FileSystem::free_block(int block_num) {
 }
 
 int FileSystem::find_free_inode() {
-    for (int i = 0; i < NUM_INODES; ++i) {
+    // For external filesystems, we don't use inodes
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    if (is_external) {
+        return -1;  // Not supported for external filesystems
+    }
+
+    // Ensure inodes vector is initialized
+    if (inodes.empty()) {
+        qDebug() << "Warning: Inodes vector is empty in find_free_inode";
+        return -1;
+    }
+
+    for (size_t i = 0; i < inodes.size(); ++i) {
         if (inodes[i].mode == 0) return i;
     }
     return -1;
@@ -131,7 +144,10 @@ std::vector<DirEntry> FileSystem::get_dir_entries(int inode_num) {
     }
     
     // Original implementation for our virtual filesystem
-    if (inode_num < 0 || inode_num >= NUM_INODES || inodes[inode_num].mode != 2) {
+    if (!is_valid_inode(inode_num) || inodes[inode_num].mode != 2) {
+        if (inode_num >= 0) {
+            qDebug() << "Warning: Attempted to access invalid directory inode:" << inode_num;
+        }
         return entries;
     }
 
@@ -151,7 +167,10 @@ std::vector<DirEntry> FileSystem::get_dir_entries(int inode_num) {
 }
 
 void FileSystem::add_dir_entry(int dir_inode_num, const std::string& name, int new_inode_num) {
-    if (dir_inode_num < 0 || dir_inode_num >= NUM_INODES || inodes[dir_inode_num].mode != 2) {
+    if (!is_valid_inode(dir_inode_num) || inodes[dir_inode_num].mode != 2) {
+        if (dir_inode_num >= 0) {
+            qDebug() << "Warning: Attempted to add entry to invalid directory inode:" << dir_inode_num;
+        }
         return;
     }
 
@@ -439,6 +458,11 @@ void FileSystem::create(const std::string& filename) {
     int new_inode_num = find_free_inode();
     if (new_inode_num == -1) {
         std::cerr << "Error: No free inodes." << std::endl;
+        return;
+    }
+
+    if (!is_valid_inode(new_inode_num)) {
+        qDebug() << "Warning: Attempted to create file with invalid inode:" << new_inode_num;
         return;
     }
 
@@ -736,6 +760,10 @@ void FileSystem::unlink(const std::string& path) {
 
 
 Inode FileSystem::get_inode(int inode_num) const {
+    // Create a default inode to return in case of errors
+    Inode defaultInode;
+    defaultInode.mode = 2; // Default to directory for listings
+    
     // Check if this is an external filesystem
     bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
     
@@ -763,19 +791,80 @@ Inode FileSystem::get_inode(int inode_num) const {
         return fake_inode;
     }
     
-    // Original implementation for virtual filesystem
-    if (inode_num >= 0 && inode_num < NUM_INODES) {
-        return inodes[inode_num];
+    // Basic bounds checks before trying to access the inodes vector
+    if (inode_num < 0 || inode_num >= NUM_INODES) {
+        if (inode_num >= 0) { // Only log non-negative inode numbers
+            qDebug() << "Warning: Inode number out of range:" << inode_num << "(max:" << (NUM_INODES-1) << ")";
+        }
+        return defaultInode;
     }
-    return Inode(); 
+    
+    // Check if filesystem is mounted
+    if (!disk.is_open()) {
+        if (inode_num != 0) { // Don't log for root inode
+            qDebug() << "Warning: Attempting to get inode" << inode_num << "from unmounted filesystem";
+        }
+        return defaultInode;
+    }
+    
+    // Check if inodes vector has been initialized
+    if (inodes.empty()) {
+        qDebug() << "Warning: Inodes vector is empty, cannot access inode" << inode_num;
+        return defaultInode;
+    }
+    
+    // Check if within the bounds of the inodes vector
+    if (inode_num >= static_cast<int>(inodes.size())) {
+        qDebug() << "Warning: Inode number" << inode_num << "exceeds inodes vector size" << inodes.size();
+        return defaultInode;
+    }
+    
+    // At this point we've verified it's safe to access the vector
+    return inodes[inode_num]; 
 }
 
 #include <algorithm>
 
 void FileSystem::update_inode_times(int inode_num, bool access, bool modify, bool create) {
-    if (inode_num < 0 || inode_num >= NUM_INODES) return;
+    if (!is_valid_inode(inode_num)) {
+        if (inode_num >= 0) {  // Only log valid non-negative inode numbers
+            qDebug() << "Warning: Attempted to update times for invalid inode number:" << inode_num;
+        }
+        return;
+    }
+    
     time_t now = time(nullptr);
     if (create) inodes[inode_num].creation_time = now;
     if (access) inodes[inode_num].access_time = now;
     if (modify) inodes[inode_num].modification_time = now;
+}
+
+bool FileSystem::is_valid_inode(int inode_num) const {
+    // Basic bounds checking
+    if (inode_num < 0 || inode_num >= NUM_INODES) {
+        return false;
+    }
+    
+    // External filesystems are handled differently and don't use the inodes vector
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    if (is_external) {
+        return inode_num == 0;  // Only inode 0 is valid for external filesystems
+    }
+    
+    // Check if filesystem is mounted
+    if (!disk.is_open()) {
+        return false;  // Filesystem not mounted
+    }
+    
+    // Check if inodes vector is initialized and has enough elements
+    if (inodes.empty()) {
+        return false;  // No inodes loaded
+    }
+    
+    // Check if the inode number is within the bounds of the inodes vector
+    if (inode_num >= static_cast<int>(inodes.size())) {
+        return false;
+    }
+    
+    return true;
 }

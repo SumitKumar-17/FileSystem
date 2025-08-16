@@ -1,5 +1,6 @@
 #include "ui/tree_view_manager.h"
 #include <QHeaderView>
+#include <string.h>  // For strnlen
 
 TreeViewManager::TreeViewManager(QObject *parent, QWidget *parentWidget)
     : QObject(parent), treeDock(nullptr), treeView(nullptr), directoryModel(nullptr), fs(nullptr)
@@ -72,22 +73,37 @@ void TreeViewManager::buildDirectoryTree(QStandardItem *parentItem, int parent_i
     
     for (const auto &entry : entries)
     {
-        if (std::string(entry.name) == "." || std::string(entry.name) == "..")
+        // Create a std::string using the entry name and ensure it's properly terminated
+        std::string nameStr(entry.name, strnlen(entry.name, MAX_FILENAME_LENGTH));
+        
+        if (nameStr == "." || nameStr == "..")
             continue;
             
         Inode inode = fs->get_inode(entry.inode_num);
         
-        // Only add directories to the tree
-        if (inode.mode == 2) {
+        // Only add directories to the tree - mode 2 indicates directory
+        bool isDirectory = (inode.mode == 2);
+        if (isDirectory) {
+            // Check if the name contains only valid UTF-8 characters
+            QString entryName = QString::fromUtf8(nameStr.c_str());
+            if (entryName.isEmpty() && !nameStr.empty()) {
+                // If conversion fails, fallback to Latin1 encoding
+                entryName = QString::fromLatin1(nameStr.c_str());
+                // If still problematic, provide a placeholder name with the inode number
+                if (entryName.contains(QChar(QChar::ReplacementCharacter))) {
+                    entryName = QString("Dir-%1").arg(entry.inode_num);
+                }
+            }
+            
             QStandardItem *item = new QStandardItem(QIcon(treeView->style()->standardIcon(QStyle::SP_DirIcon)), 
-                                                    QString::fromStdString(entry.name));
+                                                   entryName);
             item->setData(entry.inode_num, Qt::UserRole);
             parentItem->appendRow(item);
             
             // Recursively build subdirectories
             std::string full_path = parent_path;
             if (parent_path != "/") full_path += "/";
-            full_path += entry.name;
+            full_path += nameStr;
             
             buildDirectoryTree(item, entry.inode_num, full_path);
         }

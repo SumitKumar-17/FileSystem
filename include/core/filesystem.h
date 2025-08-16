@@ -85,6 +85,13 @@ public:
     
     Inode get_inode(int inode_num) const;
     
+    /**
+     * @brief Check if an inode number is valid
+     * @param inode_num The inode number to check
+     * @return True if the inode number is valid
+     */
+    bool is_valid_inode(int inode_num) const;
+    
     // Allow DiskUsageWidget to read blocks
     void read_block(int block_num, char* data);
 

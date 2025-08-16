@@ -272,3 +272,7 @@ void MainWindow::dropEvent(QDropEvent *event)
 {
     fileOps->handleDropEvent(event);
 }
+
+void MainWindow::updateStatusBar(const QString &message) {
+    ui->statusbar->showMessage(message, 5000); // Show for 5 seconds
+}
