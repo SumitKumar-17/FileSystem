@@ -16,6 +16,11 @@ include_directories(include)
 add_executable(FileSystemUI
     src/main.cpp
     src/core/filesystem.cpp
+    src/core/journal.cpp
+    src/core/fsck.cpp
+    src/core/search.cpp
+    src/core/quota.cpp
+    src/core/snapshot.cpp
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui # Explicitly add the UI file
 )
@@ -24,4 +29,12 @@ add_executable(FileSystemUI
 target_link_libraries(FileSystemUI PRIVATE Qt::Widgets)
 
 # Add the header with Q_OBJECT to the sources to ensure AUTOMOC processes it.
-target_sources(FileSystemUI PRIVATE include/ui/mainwindow.h)
+target_sources(FileSystemUI PRIVATE
+    include/ui/mainwindow.h
+    include/core/filesystem.h
+    include/core/journal.h
+    include/core/fsck.h
+    include/core/search.h
+    include/core/quota.h
+    include/core/snapshot.h
+)

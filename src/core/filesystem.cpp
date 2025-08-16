@@ -585,3 +585,13 @@ Inode FileSystem::get_inode(int inode_num) const {
     }
     return Inode(); 
 }
+
+#include <algorithm>
+
+void FileSystem::update_inode_times(int inode_num, bool access, bool modify, bool create) {
+    if (inode_num < 0 || inode_num >= NUM_INODES) return;
+    time_t now = time(nullptr);
+    if (create) inodes[inode_num].creation_time = now;
+    if (access) inodes[inode_num].access_time = now;
+    if (modify) inodes[inode_num].modification_time = now;
+}

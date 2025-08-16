@@ -1,4 +1,5 @@
 #include "core/journal.h"
+#include "core/filesystem.h"
 #include <cstring>
 #include <iostream>
 

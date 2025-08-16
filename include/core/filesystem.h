@@ -52,7 +52,6 @@ private:
     Journal* journal;
 
     void write_block(int block_num, const char* data);
-    void read_block(int block_num, char* data);
     void write_superblock();
     void read_superblock();
     void write_inodes();
@@ -85,6 +84,9 @@ public:
     void unlink(const std::string& path);
     
     Inode get_inode(int inode_num) const;
+    
+    // Allow DiskUsageWidget to read blocks
+    void read_block(int block_num, char* data);
 
     friend class Journal;
 };

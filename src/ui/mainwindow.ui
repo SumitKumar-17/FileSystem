@@ -6,12 +6,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>800</width>
-    <height>600</height>
+    <width>900</width>
+    <height>700</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Simple File System GUI</string>
+   <string>FileSystem Explorer</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
@@ -32,6 +32,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="fsDetectButton">
+        <property name="text">
+         <string>Detect Filesystems</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="horizontalSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
@@ -43,6 +50,20 @@
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="searchLineEdit">
+        <property name="placeholderText">
+         <string>Search files...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="searchButton">
+        <property name="text">
+         <string>Search</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>
@@ -101,12 +122,100 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>800</width>
+     <width>900</width>
      <height>22</height>
     </rect>
    </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="actionOpen_Filesystem"/>
+    <addaction name="actionDetect_Filesystems"/>
+    <addaction name="separator"/>
+    <addaction name="actionExit"/>
+   </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>View</string>
+    </property>
+    <addaction name="actionTreeView"/>
+    <addaction name="actionListView"/>
+   </widget>
+   <widget class="QMenu" name="menuTools">
+    <property name="title">
+     <string>Tools</string>
+    </property>
+    <addaction name="actionFsCheck"/>
+    <addaction name="actionSearch"/>
+    <addaction name="actionQuotaManager"/>
+    <addaction name="actionSnapshots"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuView"/>
+   <addaction name="menuTools"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
+  <widget class="QToolBar" name="fsToolBar">
+   <property name="windowTitle">
+    <string>toolBar</string>
+   </property>
+   <attribute name="toolBarArea">
+    <enum>TopToolBarArea</enum>
+   </attribute>
+   <attribute name="toolBarBreak">
+    <bool>false</bool>
+   </attribute>
+   <addaction name="actionFsCheck"/>
+   <addaction name="actionSearch"/>
+   <addaction name="actionQuotaManager"/>
+   <addaction name="actionSnapshots"/>
+  </widget>
+  <action name="actionFsCheck">
+   <property name="text">
+    <string>Filesystem Check</string>
+   </property>
+  </action>
+  <action name="actionSearch">
+   <property name="text">
+    <string>Advanced Search</string>
+   </property>
+  </action>
+  <action name="actionQuotaManager">
+   <property name="text">
+    <string>Quota Manager</string>
+   </property>
+  </action>
+  <action name="actionSnapshots">
+   <property name="text">
+    <string>Snapshots</string>
+   </property>
+  </action>
+  <action name="actionTreeView">
+   <property name="text">
+    <string>Tree View</string>
+   </property>
+  </action>
+  <action name="actionListView">
+   <property name="text">
+    <string>List View</string>
+   </property>
+  </action>
+  <action name="actionDetect_Filesystems">
+   <property name="text">
+    <string>Detect Filesystems</string>
+   </property>
+  </action>
+  <action name="actionOpen_Filesystem">
+   <property name="text">
+    <string>Open Filesystem</string>
+   </property>
+  </action>
+  <action name="actionExit">
+   <property name="text">
+    <string>Exit</string>
+   </property>
+  </action>
  </widget>
  <resources/>
  <connections/>
