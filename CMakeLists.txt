@@ -24,6 +24,10 @@ add_executable(FileSystemUI
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui # Explicitly add the UI file
     src/ui/filesystem_detector.cpp
+    src/ui/filesystem_local_detector.cpp
+    src/ui/filesystem_external_detector.cpp
+    src/ui/mainwindow_file_ops.cpp
+    src/ui/mainwindow_dialogs.cpp
     src/ui/filesystem_mount_dialog.cpp
     src/ui/tree_view_manager.cpp
 )
@@ -41,6 +45,10 @@ target_sources(FileSystemUI PRIVATE
     include/core/quota.h
     include/core/snapshot.h
     include/ui/filesystem_detector.h
+    include/ui/filesystem_local_detector.h
+    include/ui/filesystem_external_detector.h
+    include/ui/mainwindow_file_ops.h
+    include/ui/mainwindow_dialogs.h
     include/ui/filesystem_mount_dialog.h
     include/ui/tree_view_manager.h
 )

@@ -35,11 +35,9 @@ QStringList FileSystemDetector::detectFilesystems()
             if (!addedExternalPaths.contains(realPath)) {
                 addedExternalPaths.insert(realPath);
                 result.append(fs);
-                qDebug() << "Added external filesystem:" << fs;
             }
         } else {
             result.append(fs);
-            qDebug() << "Added filesystem:" << fs;
         }
     }
     qDebug() << "Found" << mountPointFs.size() << "external drives in standard mount points";
@@ -53,11 +51,9 @@ QStringList FileSystemDetector::detectFilesystems()
             if (!addedExternalPaths.contains(realPath)) {
                 addedExternalPaths.insert(realPath);
                 result.append(fs);
-                qDebug() << "Added external filesystem from /proc/mounts:" << fs;
             }
         } else {
             result.append(fs);
-            qDebug() << "Added filesystem from /proc/mounts:" << fs;
         }
     }
     qDebug() << "Found" << procMountsFs.size() << "filesystems from /proc/mounts";
@@ -71,11 +67,9 @@ QStringList FileSystemDetector::detectFilesystems()
             if (!addedExternalPaths.contains(realPath)) {
                 addedExternalPaths.insert(realPath);
                 result.append(fs);
-                qDebug() << "Added external filesystem from lsblk:" << fs;
             }
         } else {
             result.append(fs);
-            qDebug() << "Added filesystem from lsblk:" << fs;
         }
     }
     qDebug() << "Found" << lsblkFs.size() << "filesystems using lsblk";
@@ -90,11 +84,9 @@ QStringList FileSystemDetector::detectFilesystems()
                 if (!addedExternalPaths.contains(realPath)) {
                     addedExternalPaths.insert(realPath);
                     result.append(fs);
-                    qDebug() << "Added external filesystem from manual detection:" << fs;
                 }
             } else {
                 result.append(fs);
-                qDebug() << "Added filesystem from manual detection:" << fs;
             }
         }
         qDebug() << "Found" << manualFs.size() << "filesystems using manual detection";
@@ -102,11 +94,6 @@ QStringList FileSystemDetector::detectFilesystems()
     
     qDebug() << "==== Filesystem detection complete ====";
     qDebug() << "Total filesystems found:" << result.size();
-    
-    // Print all found filesystems for debugging
-    for (const QString &fs : result) {
-        qDebug() << "  - " << fs << " -> " << getDisplayNameForPath(fs);
-    }
     
     return result;
 }
@@ -121,64 +108,17 @@ QString FileSystemDetector::getDisplayNameForPath(const QString &path)
     if (isExternalPath(path)) {
         QString realPath = extractRealPath(path);
         
-        // Run lsblk to get friendly name if available
-        QProcess process;
-        process.start("lsblk", QStringList() << "-n" << "-o" << "LABEL,SIZE" << realPath);
-        
-        if (process.waitForFinished(1000)) {
-            QString output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
-            if (!output.isEmpty()) {
-                QStringList parts = output.split(" ", Qt::SkipEmptyParts);
-                if (parts.size() >= 2) {
-                    // We have a label and size
-                    return "External: " + parts[0] + " (" + parts[1] + ")";
-                } else if (parts.size() == 1) {
-                    // Try to determine if it's a size or label
-                    if (parts[0].contains("G") || parts[0].contains("M") || parts[0].contains("K")) {
-                        // It's likely a size
-                        return "External Drive (" + parts[0] + ")";
-                    } else {
-                        // It's likely a label
-                        return "External: " + parts[0];
-                    }
-                }
-            }
-        }
-        
-        // Extract a user-friendly name from the path if lsblk failed
+        // Extract a user-friendly name from the path
         int lastSlash = realPath.lastIndexOf('/');
         if (lastSlash != -1 && lastSlash < realPath.length() - 1) {
-            QString name = realPath.mid(lastSlash + 1);
-            // Check if it's in a standard mount location
-            if (realPath.startsWith("/media/") || realPath.startsWith("/run/media/")) {
-                return "External: " + name;
-            } else if (realPath.startsWith("/mnt/")) {
-                return "Mounted: " + name;
-            } else {
-                return "External Drive: " + name;
-            }
+            return "External: " + realPath.mid(lastSlash + 1);
         } else {
             return "External Drive";
         }
     } else {
         // For local .fs files, use the filename
         QFileInfo fileInfo(path);
-        QString filename = fileInfo.fileName();
-        QString sizeStr;
-        
-        // Get the file size for display
-        qint64 size = fileInfo.size();
-        if (size > 1024*1024*1024) {
-            sizeStr = QString::number(size / (1024.0*1024*1024), 'f', 2) + " GB";
-        } else if (size > 1024*1024) {
-            sizeStr = QString::number(size / (1024.0*1024), 'f', 2) + " MB";
-        } else if (size > 1024) {
-            sizeStr = QString::number(size / 1024.0, 'f', 2) + " KB";
-        } else {
-            sizeStr = QString::number(size) + " bytes";
-        }
-        
-        return "Local: " + filename + " (" + sizeStr + ")";
+        return fileInfo.fileName();
     }
 }
 

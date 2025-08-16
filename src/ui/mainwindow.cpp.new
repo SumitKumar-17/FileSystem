@@ -138,12 +138,17 @@ void MainWindow::on_formatButton_clicked()
         QMessageBox::Yes | QMessageBox::No);
     
     if (reply == QMessageBox::Yes) {
-        fs->format();
-        QMessageBox::information(this, "Format", "Filesystem formatted successfully.");
-        
-        // Reset UI
-        ui->fileContentTextEdit->clear();
-        refreshFileList();
+        bool result = fs->format();
+        if (result) {
+            QMessageBox::information(this, "Format", "Filesystem formatted successfully.");
+            
+            // Reset UI
+            ui->fileContentTextEdit->clear();
+            ui->currentPathLabel->setText("/");
+            refreshFileList();
+        } else {
+            QMessageBox::critical(this, "Error", "Failed to format filesystem.");
+        }
     }
 }
 
@@ -251,7 +256,7 @@ void MainWindow::checkAvailableFilesystems()
 void MainWindow::updateAvailableFilesystemsList()
 {
     if (fsDetector) {
-        availableFilesystems = fsDetector->detectFilesystems();
+        availableFilesystems = fsDetector->getDetectedFilesystems();
     }
 }
 
@@ -260,6 +265,7 @@ void MainWindow::onDirectorySelected(const std::string &path)
     if (!fs) return;
     
     current_open_file = "";
+    ui->currentPathLabel->setText(QString::fromStdString(path));
     refreshFileList();
 }
 

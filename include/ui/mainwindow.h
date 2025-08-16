@@ -27,6 +27,23 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+    
+    // Accessor for the FileSystem object
+    FileSystem* getFileSystem() { return fs.get(); }
+    
+    // Accessor for the UI
+    Ui::MainWindow* getUI() { return ui; }
+    
+    // Accessors for other components
+    FileSystemCheck* getFsCheck() { return fsck.get(); }
+    FileSystemSearch* getSearch() { return search.get(); }
+    QuotaManager* getQuotaManager() { return quotaManager.get(); }
+    SnapshotManager* getSnapshotManager() { return snapshotManager.get(); }
+    FileSystemDetector* getFsDetector() { return fsDetector.get(); }
+    
+    // Accessor for current open file
+    std::string getCurrentOpenFile() { return current_open_file; }
+    void setCurrentOpenFile(const std::string& path) { current_open_file = path; }
 
 private slots:
     void on_formatButton_clicked();

@@ -8,6 +8,10 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QDialogButtonBox>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QBrush>
+#include <QColor>
 
 /**
  * @brief Dialog for selecting and mounting a filesystem
@@ -36,6 +40,20 @@ private:
     
     void setupUI();
     void populateFilesystemList(const QStringList &availableFilesystems);
+    
+    /**
+     * @brief Format a size in bytes to a human-readable string
+     * @param bytes Size in bytes
+     * @return Formatted size string (e.g., "1.23 MB")
+     */
+    QString formatSize(qint64 bytes);
+    
+    /**
+     * @brief Get size information for a mounted device
+     * @param mountPoint The mount point of the device
+     * @return Size information string or empty string if not available
+     */
+    QString getDeviceSizeInfo(const QString &mountPoint);
     
 private slots:
     void onAccepted();
