@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <ctime>
+#include "journal.h"
 
 // Constants for our file system
 const int BLOCK_SIZE = 512;
@@ -21,10 +23,17 @@ struct Superblock {
 
 // Inode structure
 struct Inode {
-    int mode; 
+    int mode; // Permissions and file type (e.g., regular file, directory)
+    int uid; // User ID
+    int gid; // Group ID
     int size;
+    int link_count;
+    time_t creation_time;
+    time_t modification_time;
+    time_t access_time;
     int direct_blocks[10];
     int indirect_block;
+    int flags; // Additional flags (e.g., for symbolic links)
 };
 
 // Directory entry structure
@@ -40,6 +49,7 @@ private:
     Superblock sb;
     std::vector<Inode> inodes;
     int current_dir_inode;
+    Journal* journal;
 
     void write_block(int block_num, const char* data);
     void read_block(int block_num, char* data);
@@ -51,6 +61,7 @@ private:
     void free_block(int block_num);
     int find_free_inode();
     void add_dir_entry(int dir_inode_num, const std::string& name, int new_inode_num);
+    void update_inode_times(int inode_num, bool access, bool modify, bool create);
 
 public:
     FileSystem(const std::string& name);
@@ -67,8 +78,15 @@ public:
     void create(const std::string& filename);
     void write(const std::string& filename, const std::string& data);
     std::string read(const std::string& filename);
+    void chmod(const std::string& path, int mode);
+    void chown(const std::string& path, int uid, int gid);
+    void link(const std::string& oldpath, const std::string& newpath);
+    void symlink(const std::string& target, const std::string& linkpath);
+    void unlink(const std::string& path);
     
     Inode get_inode(int inode_num) const;
+
+    friend class Journal;
 };
 
 #endif // FILESYSTEM_H

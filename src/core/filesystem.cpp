@@ -3,12 +3,13 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm> 
-FileSystem::FileSystem(const std::string& name) : disk_name(name), current_dir_inode(0) {}
+FileSystem::FileSystem(const std::string& name) : disk_name(name), current_dir_inode(0), journal(nullptr) {}
 
 FileSystem::~FileSystem() {
     if (disk.is_open()) {
         unmount();
     }
+    delete journal;
 }
 
 void FileSystem::write_block(int block_num, const char* data) {
@@ -150,10 +151,11 @@ void FileSystem::format() {
     sb.num_blocks = NUM_BLOCKS;
     sb.num_inodes = NUM_INODES;
     sb.inode_blocks = (NUM_INODES * sizeof(Inode) + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    sb.free_block_list_head = 1 + sb.inode_blocks;
+    int journal_blocks = 100; // Reserve 100 blocks for the journal
+    sb.free_block_list_head = 1 + sb.inode_blocks + journal_blocks;
     write_superblock();
 
-    for (int i = 1 + sb.inode_blocks; i < NUM_BLOCKS - 1; ++i) {
+    for (int i = 1 + sb.inode_blocks + journal_blocks; i < NUM_BLOCKS - 1; ++i) {
         int next_block = i + 1;
         char buffer[BLOCK_SIZE] = {0};
         memcpy(buffer, &next_block, sizeof(int));
@@ -172,6 +174,10 @@ void FileSystem::format() {
     int root_inode_num = find_free_inode();
     inodes[root_inode_num].mode = 2; // Directory
     inodes[root_inode_num].size = 0;
+    inodes[root_inode_num].uid = 0; // root user
+    inodes[root_inode_num].gid = 0; // root group
+    inodes[root_inode_num].link_count = 2; // . and ..
+    update_inode_times(root_inode_num, true, true, true);
     current_dir_inode = root_inode_num;
 
     add_dir_entry(root_inode_num, ".", root_inode_num);
@@ -188,6 +194,10 @@ bool FileSystem::mount() {
     }
     read_superblock();
     read_inodes();
+    int journal_start_block = 1 + sb.inode_blocks;
+    int journal_num_blocks = 100;
+    journal = new Journal(this, journal_start_block, journal_num_blocks);
+    journal->recover();
     current_dir_inode = 0; // Root directory
     return true;
 }
@@ -201,18 +211,33 @@ void FileSystem::unmount() {
 }
 
 void FileSystem::mkdir(const std::string& dirname) {
+    journal->begin_transaction();
     int new_inode_num = find_free_inode();
     if (new_inode_num == -1) {
         std::cerr << "Error: No free inodes." << std::endl;
+        journal->commit_transaction(); // or some rollback mechanism
         return;
     }
 
     inodes[new_inode_num].mode = 2; // Directory
     inodes[new_inode_num].size = 0;
+    inodes[new_inode_num].uid = 0; // Default to root user/group
+    inodes[new_inode_num].gid = 0;
+    inodes[new_inode_num].link_count = 2; // For . and ..
+    update_inode_times(new_inode_num, true, true, true);
+
 
     add_dir_entry(current_dir_inode, dirname, new_inode_num);
     add_dir_entry(new_inode_num, ".", new_inode_num);
     add_dir_entry(new_inode_num, "..", current_dir_inode);
+    
+    char inode_buffer[BLOCK_SIZE];
+    int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+    int block_to_update = 1 + (new_inode_num / inodes_per_block);
+    memcpy(inode_buffer, &inodes[(new_inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+    journal->log_metadata_block(block_to_update, inode_buffer);
+
+    journal->commit_transaction();
 }
 
 std::vector<DirEntry> FileSystem::ls() {
@@ -263,6 +288,10 @@ void FileSystem::create(const std::string& filename) {
 
     inodes[new_inode_num].mode = 1; // File
     inodes[new_inode_num].size = 0;
+    inodes[new_inode_num].uid = 0; // Default to root user/group
+    inodes[new_inode_num].gid = 0;
+    inodes[new_inode_num].link_count = 1;
+    update_inode_times(new_inode_num, true, true, true);
     for(int i=0; i<10; ++i) inodes[new_inode_num].direct_blocks[i] = 0;
     inodes[new_inode_num].indirect_block = 0;
 
@@ -270,11 +299,14 @@ void FileSystem::create(const std::string& filename) {
 }
 
 void FileSystem::write(const std::string& filename, const std::string& data) {
+    journal->begin_transaction();
     int inode_num = find_inode_by_path(filename);
     if (inode_num == -1 || inodes[inode_num].mode != 1) {
         std::cerr << "Error: File not found." << std::endl;
+        journal->commit_transaction();
         return;
     }
+    update_inode_times(inode_num, false, true, false);
 
     Inode& inode = inodes[inode_num];
     // For simplicity, this overwrites the file completely.
@@ -351,7 +383,16 @@ void FileSystem::write(const std::string& filename, const std::string& data) {
             inode.size += to_write;
         }
         write_block(indirect_block_num, indirect_buffer);
+        journal->log_data_block(indirect_block_num, indirect_buffer);
     }
+    
+    char inode_buffer[BLOCK_SIZE];
+    int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+    int block_to_update = 1 + (inode_num / inodes_per_block);
+    memcpy(inode_buffer, &inodes[(inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+    journal->log_metadata_block(block_to_update, inode_buffer);
+
+    journal->commit_transaction();
 }
 
 std::string FileSystem::read(const std::string& filename) {
@@ -359,6 +400,7 @@ std::string FileSystem::read(const std::string& filename) {
     if (inode_num == -1 || inodes[inode_num].mode != 1) {
         return "Error: File not found.";
     }
+    update_inode_times(inode_num, true, false, false);
 
     Inode& inode = inodes[inode_num];
     std::string content;
@@ -395,6 +437,147 @@ std::string FileSystem::read(const std::string& filename) {
 
     return content;
 }
+
+void FileSystem::chmod(const std::string& path, int mode) {
+    journal->begin_transaction();
+    int inode_num = find_inode_by_path(path);
+    if (inode_num != -1) {
+        inodes[inode_num].mode = (inodes[inode_num].mode & ~0777) | mode;
+        update_inode_times(inode_num, false, true, false);
+        
+        char inode_buffer[BLOCK_SIZE];
+        int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+        int block_to_update = 1 + (inode_num / inodes_per_block);
+        memcpy(inode_buffer, &inodes[(inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+        journal->log_metadata_block(block_to_update, inode_buffer);
+
+    } else {
+        std::cerr << "Error: File or directory not found." << std::endl;
+    }
+    journal->commit_transaction();
+}
+
+void FileSystem::chown(const std::string& path, int uid, int gid) {
+    journal->begin_transaction();
+    int inode_num = find_inode_by_path(path);
+    if (inode_num != -1) {
+        inodes[inode_num].uid = uid;
+        inodes[inode_num].gid = gid;
+        update_inode_times(inode_num, false, true, false);
+
+        char inode_buffer[BLOCK_SIZE];
+        int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+        int block_to_update = 1 + (inode_num / inodes_per_block);
+        memcpy(inode_buffer, &inodes[(inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+        journal->log_metadata_block(block_to_update, inode_buffer);
+
+    } else {
+        std::cerr << "Error: File or directory not found." << std::endl;
+    }
+    journal->commit_transaction();
+}
+
+void FileSystem::link(const std::string& oldpath, const std::string& newpath) {
+    journal->begin_transaction();
+    int inode_num = find_inode_by_path(oldpath);
+    if (inode_num == -1) {
+        std::cerr << "Error: Source file not found." << std::endl;
+        journal->commit_transaction();
+        return;
+    }
+    if (inodes[inode_num].mode == 2) { // is a directory
+        std::cerr << "Error: Cannot create hard link to a directory." << std::endl;
+        journal->commit_transaction();
+        return;
+    }
+
+    // For simplicity, assuming newpath is in the current directory
+    add_dir_entry(current_dir_inode, newpath, inode_num);
+    inodes[inode_num].link_count++;
+    update_inode_times(inode_num, false, true, false);
+
+    char inode_buffer[BLOCK_SIZE];
+    int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+    int block_to_update = 1 + (inode_num / inodes_per_block);
+    memcpy(inode_buffer, &inodes[(inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+    journal->log_metadata_block(block_to_update, inode_buffer);
+
+    journal->commit_transaction();
+}
+
+void FileSystem::symlink(const std::string& target, const std::string& linkpath) {
+    journal->begin_transaction();
+    int new_inode_num = find_free_inode();
+    if (new_inode_num == -1) {
+        std::cerr << "Error: No free inodes." << std::endl;
+        journal->commit_transaction();
+        return;
+    }
+
+    inodes[new_inode_num].mode = 3; // Symbolic link type
+    inodes[new_inode_num].size = target.length();
+    inodes[new_inode_num].uid = 0;
+    inodes[new_inode_num].gid = 0;
+    inodes[new_inode_num].link_count = 1;
+    update_inode_times(new_inode_num, true, true, true);
+
+    // Store target path in a data block
+    if (!target.empty()) {
+        int block_num = allocate_block();
+        if (block_num != -1) {
+            inodes[new_inode_num].direct_blocks[0] = block_num;
+            char buffer[BLOCK_SIZE] = {0};
+            strncpy(buffer, target.c_str(), BLOCK_SIZE);
+            write_block(block_num, buffer);
+            journal->log_data_block(block_num, buffer);
+        }
+    }
+
+    add_dir_entry(current_dir_inode, linkpath, new_inode_num);
+
+    char inode_buffer[BLOCK_SIZE];
+    int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+    int block_to_update = 1 + (new_inode_num / inodes_per_block);
+    memcpy(inode_buffer, &inodes[(new_inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+    journal->log_metadata_block(block_to_update, inode_buffer);
+
+    journal->commit_transaction();
+}
+
+void FileSystem::unlink(const std::string& path) {
+    journal->begin_transaction();
+    // This is a simplified unlink. It doesn't handle removing directory entries yet.
+    int inode_num = find_inode_by_path(path);
+    if (inode_num == -1) {
+        std::cerr << "Error: File not found." << std::endl;
+        journal->commit_transaction();
+        return;
+    }
+
+    inodes[inode_num].link_count--;
+    if (inodes[inode_num].link_count == 0) {
+        // Free data blocks
+        for (int i = 0; i < 10; ++i) {
+            if (inodes[inode_num].direct_blocks[i] != 0) {
+                free_block(inodes[inode_num].direct_blocks[i]);
+            }
+        }
+        // Free indirect blocks... (omitted for brevity)
+        
+        // Free inode
+        inodes[inode_num].mode = 0; // Mark as free
+    }
+    update_inode_times(inode_num, false, true, false);
+
+    char inode_buffer[BLOCK_SIZE];
+    int inodes_per_block = BLOCK_SIZE / sizeof(Inode);
+    int block_to_update = 1 + (inode_num / inodes_per_block);
+    memcpy(inode_buffer, &inodes[(inode_num / inodes_per_block) * inodes_per_block], inodes_per_block * sizeof(Inode));
+    journal->log_metadata_block(block_to_update, inode_buffer);
+
+    journal->commit_transaction();
+}
+
 
 Inode FileSystem::get_inode(int inode_num) const {
     if (inode_num >= 0 && inode_num < NUM_INODES) {

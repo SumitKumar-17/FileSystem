@@ -15,6 +15,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     ui->saveButton->setEnabled(false);
     ui->mkdirButton->setEnabled(false);
     ui->createFileButton->setEnabled(false);
+
+    ui->fileListWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->fileListWidget, &QListWidget::customContextMenuRequested, this, &MainWindow::on_fileListWidget_customContextMenuRequested);
 }
 
 MainWindow::~MainWindow()
@@ -136,4 +139,65 @@ void MainWindow::on_createFileButton_clicked()
         fs->create(text.toStdString());
         refreshFileList();
     }
+}
+
+void MainWindow::on_fileListWidget_customContextMenuRequested(const QPoint &pos)
+{
+    QListWidgetItem* item = ui->fileListWidget->itemAt(pos);
+    if (!item) return;
+
+    int inode_num = item->data(Qt::UserRole).toInt();
+    if (inode_num == -1) return; // No context menu for ".."
+
+    QMenu contextMenu(this);
+    QAction *deleteAction = contextMenu.addAction("Delete");
+    QAction *renameAction = contextMenu.addAction("Rename");
+    QAction *propertiesAction = contextMenu.addAction("Properties");
+
+    connect(deleteAction, &QAction::triggered, [this, item]() {
+        std::string name = item->text().mid(4).toStdString();
+        fs->unlink(name);
+        refreshFileList();
+    });
+
+    connect(renameAction, &QAction::triggered, [this, item]() {
+        // Simple rename, does not move files yet
+        bool ok;
+        QString newName = QInputDialog::getText(this, "Rename", "New name:", QLineEdit::Normal, item->text().mid(4), &ok);
+        if (ok && !newName.isEmpty()) {
+            // This is a simplified rename. A real implementation would need a `rename` method in the filesystem
+            // that can also move files between directories.
+            std::string oldName = item->text().mid(4).toStdString();
+            fs->unlink(oldName); // Unlink old name
+            // Re-create with new name. This is not an atomic rename.
+            // For hard links, we would just add a new directory entry and remove the old one.
+            // For files, we'd need to decide if we are creating a new file or just renaming the link.
+            // This is a placeholder for a proper rename implementation.
+            fs->create(newName.toStdString()); // This is a simplification
+            refreshFileList();
+        }
+    });
+
+    connect(propertiesAction, &QAction::triggered, [this, inode_num]() {
+        Inode inode = fs->get_inode(inode_num);
+        QString props;
+        props += "Inode: " + QString::number(inode_num) + "\n";
+        props += "Size: " + QString::number(inode.size) + " bytes\n";
+        props += "Links: " + QString::number(inode.link_count) + "\n";
+        props += "Mode: " + QString::number(inode.mode, 8) + "\n"; // Octal
+        props += "UID: " + QString::number(inode.uid) + "\n";
+        props += "GID: " + QString::number(inode.gid) + "\n";
+        
+        char time_buf[80];
+        strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", localtime(&inode.creation_time));
+        props += "Created: " + QString(time_buf) + "\n";
+        strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", localtime(&inode.modification_time));
+        props += "Modified: " + QString(time_buf) + "\n";
+        strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", localtime(&inode.access_time));
+        props += "Accessed: " + QString(time_buf) + "\n";
+
+        QMessageBox::information(this, "Properties", props);
+    });
+
+    contextMenu.exec(ui->fileListWidget->mapToGlobal(pos));
 }

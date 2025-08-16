@@ -4,6 +4,10 @@
 #include <QMainWindow>
 #include <memory>
 #include "core/filesystem.h"
+#include <QMenu>
+#include <QInputDialog>
+#include <QMessageBox>
+
 namespace Ui {
 class MainWindow;
 }
@@ -24,6 +28,7 @@ private slots:
     void on_saveButton_clicked();
     void on_mkdirButton_clicked();
     void on_createFileButton_clicked();
+    void on_fileListWidget_customContextMenuRequested(const QPoint &pos);
 
 private:
     void refreshFileList();
