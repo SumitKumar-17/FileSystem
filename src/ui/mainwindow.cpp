@@ -1,5 +1,6 @@
 #include "ui/mainwindow.h"
 #include "ui_mainwindow.h"
+#include "ui/filesystem_mount_dialog.h"
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QListWidgetItem>
@@ -61,8 +62,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent),
     connect(ui->actionTreeView, &QAction::triggered, this, &MainWindow::on_actionTreeView_triggered);
     connect(ui->actionDetect_Filesystems, &QAction::triggered, this, &MainWindow::on_actionDetectFilesystems_triggered);
     
-    // Initialize tree view
-    setupTreeView();
+    // Initialize our modular components
+    fsDetector = std::make_unique<FileSystemDetector>(this);
+    treeViewManager = std::make_unique<TreeViewManager>(this, this);
+    addDockWidget(Qt::LeftDockWidgetArea, treeViewManager->getDockWidget());
+    connect(treeViewManager.get(), &TreeViewManager::directorySelected, this, &MainWindow::onDirectorySelected);
     
     // Setup filesystem detection timer
     fsDetectionTimer = new QTimer(this);
@@ -99,35 +103,6 @@ void MainWindow::setupFsToolbar()
     ui->fsToolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
 }
 
-void MainWindow::setupTreeView()
-{
-    // Create tree view as a dock widget
-    treeDock = new QDockWidget("Directory Tree", this);
-    treeDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
-    treeView = new QTreeView(treeDock);
-    treeDock->setWidget(treeView);
-    
-    // Create the model
-    directoryModel = new QStandardItemModel(this);
-    directoryModel->setHorizontalHeaderLabels(QStringList() << "Name");
-    
-    // Configure tree view
-    treeView->setModel(directoryModel);
-    treeView->setHeaderHidden(false);
-    treeView->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    treeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    treeView->setDragEnabled(true);
-    treeView->setAcceptDrops(true);
-    treeView->setDropIndicatorShown(true);
-    
-    // Connect signals
-    connect(treeView, &QTreeView::clicked, this, &MainWindow::on_treeView_clicked);
-    
-    // Add to main window (initially hidden)
-    addDockWidget(Qt::LeftDockWidgetArea, treeDock);
-    treeDock->hide();
-}
-
 void MainWindow::refreshFileList()
 {
     ui->fileListWidget->clear();
@@ -158,69 +133,17 @@ void MainWindow::refreshFileList()
     }
     
     // Also refresh tree view if it's active
-    if (treeDock && treeDock->isVisible()) {
-        refreshTreeView();
+    if (treeViewManager && treeViewManager->getDockWidget()->isVisible()) {
+        treeViewManager->refreshTreeView();
     }
 }
 
 void MainWindow::refreshTreeView()
 {
-    if (!fs) return;
+    if (!fs || !treeViewManager) return;
     
-    // Save the current directory path
-    std::string current_path = "/";
-    
-    // Clear the tree
-    directoryModel->clear();
-    directoryModel->setHorizontalHeaderLabels(QStringList() << "Name");
-    
-    // Create root item
-    QStandardItem *rootItem = new QStandardItem(QIcon(style()->standardIcon(QStyle::SP_DirIcon)), "/");
-    rootItem->setData(0, Qt::UserRole); // Root inode is always 0
-    directoryModel->appendRow(rootItem);
-    
-    // Build tree recursively - starting from root
-    buildDirectoryTree(rootItem, 0, "/");
-    
-    // Expand root by default
-    treeView->expand(directoryModel->index(0, 0));
-}
-
-void MainWindow::buildDirectoryTree(QStandardItem *parentItem, int parent_inode, const std::string &parent_path)
-{
-    if (!fs) return;
-    
-    // Restore original directory
-    int original_dir_inode = fs->find_inode_by_path(".");
-    
-    // Get entries
-    auto entries = fs->ls();
-    
-    for (const auto &entry : entries)
-    {
-        if (std::string(entry.name) == "." || std::string(entry.name) == "..")
-            continue;
-            
-        Inode inode = fs->get_inode(entry.inode_num);
-        
-        // Only add directories to the tree
-        if (inode.mode == 2) {
-            QStandardItem *item = new QStandardItem(QIcon(style()->standardIcon(QStyle::SP_DirIcon)), 
-                                                    QString::fromStdString(entry.name));
-            item->setData(entry.inode_num, Qt::UserRole);
-            parentItem->appendRow(item);
-            
-            // Recursively build subdirectories
-            std::string full_path = parent_path;
-            if (parent_path != "/") full_path += "/";
-            full_path += entry.name;
-            
-            buildDirectoryTree(item, entry.inode_num, full_path);
-        }
-    }
-    
-    // Restore original directory
-    fs->cd(".");
+    // Use the TreeViewManager to refresh the tree view
+    treeViewManager->refreshTreeView();
 }
 
 void MainWindow::on_formatButton_clicked()
@@ -388,84 +311,8 @@ void MainWindow::on_fileListWidget_customContextMenuRequested(const QPoint &pos)
 
 void MainWindow::checkAvailableFilesystems()
 {
-    QStringList fileList;
-    
-    // First, look for *.fs files in the current directory
-    QDir dir(".");
-    QStringList filters;
-    filters << "*.fs";
-    fileList = dir.entryList(filters, QDir::Files);
-    
-    // Log the current directory and files found
-    qDebug() << "Checking for filesystems in directory: " << QDir::currentPath();
-    qDebug() << "Found local fs files: " << fileList;
-    
-    // Now check for mounted filesystems
-    QStringList externalDrives;
-    
-    // Common mount points for external drives on Linux
-    QStringList mountPaths = {"/media", "/mnt", "/run/media/" + QString(qgetenv("USER"))};
-    
-    // Check each mount point for drives
-    for (const QString &mountPath : mountPaths) {
-        QDir mountDir(mountPath);
-        if (mountDir.exists()) {
-            // First level - usually user name on some distros
-            QStringList entries = mountDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-            for (const QString &entry : entries) {
-                QDir subDir(mountPath + "/" + entry);
-                // Second level - the actual devices on some distros
-                QStringList devices = subDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-                for (const QString &device : devices) {
-                    externalDrives << mountPath + "/" + entry + "/" + device;
-                }
-                // Also add first level (for systems that mount directly to /media/devicename)
-                externalDrives << mountPath + "/" + entry;
-            }
-        }
-    }
-    
-    // Add to the file list with a special prefix to identify as external drive
-    for (const QString &drive : externalDrives) {
-        QFileInfo driveInfo(drive);
-        if (driveInfo.exists() && driveInfo.isReadable()) {
-            fileList << "EXTERNAL:" + drive;
-            qDebug() << "Found external drive: " << drive;
-        }
-    }
-    
-    // Check /proc/mounts to find all mounted filesystems
-    QFile mountsFile("/proc/mounts");
-    if (mountsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QTextStream in(&mountsFile);
-        QString line;
-        while (in.readLineInto(&line)) {
-            QStringList parts = line.split(" ");
-            if (parts.size() >= 2) {
-                QString devicePath = parts[0];
-                QString mountPoint = parts[1];
-                
-                // Skip system mounts, only interested in user-mountable devices
-                if (devicePath.startsWith("/dev/sd") || 
-                    devicePath.startsWith("/dev/nvme") || 
-                    devicePath.startsWith("/dev/usb") ||
-                    devicePath.contains("UUID=")) {
-                    
-                    // Add to the list with a special prefix
-                    if (!externalDrives.contains(mountPoint) && 
-                        !mountPoint.startsWith("/boot") &&
-                        !mountPoint.startsWith("/snap") &&
-                        !mountPoint.startsWith("/var") &&
-                        mountPoint != "/" && 
-                        QFileInfo(mountPoint).exists()) {
-                        fileList << "EXTERNAL:" + mountPoint;
-                        qDebug() << "Found mounted filesystem: " << devicePath << "at" << mountPoint;
-                    }
-                }
-            }
-        }
-        mountsFile.close();
-    }
+    // Use our filesystem detector to find available filesystems
+    QStringList fileList = fsDetector->detectFilesystems();
     
     // Update only if the list has changed
     if (fileList != availableFilesystems) {
@@ -483,7 +330,7 @@ void MainWindow::updateAvailableFilesystemsList()
         
         // Count different types of filesystems
         for (const QString &item : availableFilesystems) {
-            if (item.startsWith("EXTERNAL:")) {
+            if (FileSystemDetector::isExternalPath(item)) {
                 numExternal++;
             } else {
                 numLocal++;
@@ -530,43 +377,10 @@ void MainWindow::on_actionDetectFilesystems_triggered()
         return;
     }
     
-    // Create a nicer selection dialog with readable names for external drives
-    QDialog dialog(this);
-    dialog.setWindowTitle("Select Filesystem");
-    dialog.setMinimumWidth(400);
-    
-    QVBoxLayout *layout = new QVBoxLayout(&dialog);
-    QLabel *label = new QLabel("Available Filesystems:", &dialog);
-    layout->addWidget(label);
-    
-    QListWidget *fsListWidget = new QListWidget(&dialog);
-    layout->addWidget(fsListWidget);
-    
-    // Add items with readable names
-    for (const QString &fs : availableFilesystems) {
-        QListWidgetItem *item = nullptr;
-        
-        if (fs.startsWith("EXTERNAL:")) {
-            QString path = fs.mid(9); // Remove "EXTERNAL:" prefix
-            QString displayName = "External: " + QFileInfo(path).fileName();
-            item = new QListWidgetItem(QIcon(style()->standardIcon(QStyle::SP_DriveHDIcon)), displayName);
-            item->setData(Qt::UserRole, fs);
-        } else {
-            item = new QListWidgetItem(QIcon(style()->standardIcon(QStyle::SP_FileIcon)), fs);
-            item->setData(Qt::UserRole, fs);
-        }
-        
-        fsListWidget->addItem(item);
-    }
-    
-    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    layout->addWidget(buttonBox);
-    
-    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    
-    if (dialog.exec() == QDialog::Accepted && fsListWidget->currentItem()) {
-        QString item = fsListWidget->currentItem()->data(Qt::UserRole).toString();
+    // Use our custom filesystem mount dialog
+    FileSystemMountDialog dialog(availableFilesystems, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        QString item = dialog.getSelectedFilesystem();
         
         // Unmount current if mounted
         if (fs) {
@@ -574,8 +388,8 @@ void MainWindow::on_actionDetectFilesystems_triggered()
         }
         
         // Check if it's an external drive
-        if (item.startsWith("EXTERNAL:")) {
-            QString externalPath = item.mid(9); // Remove "EXTERNAL:" prefix
+        if (FileSystemDetector::isExternalPath(item)) {
+            QString externalPath = FileSystemDetector::extractRealPath(item);
             QMessageBox::information(this, "External Drive Selected", 
                                   "You've selected an external drive at: " + externalPath + "\n"
                                   "This will be mounted directly from your system. Please ensure you have the necessary permissions.");
@@ -597,6 +411,11 @@ void MainWindow::on_actionDetectFilesystems_triggered()
             ui->createFileButton->setEnabled(true);
             ui->searchLineEdit->setEnabled(true);
             ui->searchButton->setEnabled(true);
+            
+            // Update the tree view manager
+            treeViewManager->setFileSystem(fs.get());
+            
+            // Refresh UI
             refreshFileList();
             
             // Initialize the utility classes after mounting
@@ -1164,51 +983,16 @@ void MainWindow::on_actionSnapshots_triggered()
 
 void MainWindow::on_actionTreeView_triggered()
 {
-    // Toggle tree view visibility
-    if (treeDock->isVisible()) {
-        treeDock->hide();
-    } else {
-        treeDock->show();
-        refreshTreeView();
-    }
-}
-
-void MainWindow::on_treeView_clicked(const QModelIndex &index)
-{
-    if (!fs) return;
-    
-    // Get the inode number from the item data
-    QStandardItem *item = directoryModel->itemFromIndex(index);
-    if (!item) return;
-    
-    int inode_num = item->data(Qt::UserRole).toInt();
-    
-    // Build the full path by walking up the tree
-    QString path;
-    QStandardItem *current = item;
-    while (current) {
-        if (current->parent() == nullptr) {
-            // Root item
-            path = "/" + path;
-            break;
+    // Toggle tree view visibility using the TreeViewManager
+    if (treeViewManager) {
+        QDockWidget* dock = treeViewManager->getDockWidget();
+        if (dock->isVisible()) {
+            dock->hide();
         } else {
-            if (!path.isEmpty()) {
-                path = "/" + path;
-            }
-            path = current->text() + path;
-            current = current->parent();
+            dock->show();
+            refreshTreeView();
         }
     }
-    
-    // Navigate to this directory
-    if (path == "/") {
-        fs->cd("/");
-    } else {
-        fs->cd(path.toStdString());
-    }
-    
-    // Refresh the file list to show the contents of this directory
-    refreshFileList();
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent *event)
@@ -1256,4 +1040,19 @@ void MainWindow::dropEvent(QDropEvent *event)
         // Refresh to show new files
         refreshFileList();
     }
+}
+
+void MainWindow::onDirectorySelected(const std::string &path)
+{
+    if (!fs) return;
+    
+    // Navigate to the selected directory
+    if (path == "/") {
+        fs->cd("/");
+    } else {
+        fs->cd(path);
+    }
+    
+    // Refresh the file list to show the contents of this directory
+    refreshFileList();
 }

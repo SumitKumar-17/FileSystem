@@ -23,6 +23,9 @@ add_executable(FileSystemUI
     src/core/snapshot.cpp
     src/ui/mainwindow.cpp
     src/ui/mainwindow.ui # Explicitly add the UI file
+    src/ui/filesystem_detector.cpp
+    src/ui/filesystem_mount_dialog.cpp
+    src/ui/tree_view_manager.cpp
 )
 
 # --- Link Libraries ---
@@ -37,4 +40,7 @@ target_sources(FileSystemUI PRIVATE
     include/core/search.h
     include/core/quota.h
     include/core/snapshot.h
+    include/ui/filesystem_detector.h
+    include/ui/filesystem_mount_dialog.h
+    include/ui/tree_view_manager.h
 )
