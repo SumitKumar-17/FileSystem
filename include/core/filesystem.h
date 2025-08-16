@@ -95,6 +95,14 @@ public:
     // Allow DiskUsageWidget to read blocks
     void read_block(int block_num, char* data);
 
+    // Methods for filesystem maintenance
+    void fix_invalid_block_pointer(int inode_num, int block_index);
+    void fix_orphaned_inode(int inode_num, int lost_found_inode);
+    void fix_inode_link_count(int inode_num, int correct_count);
+    
+    // Create lost+found directory if it doesn't exist
+    int create_lost_found();
+
     friend class Journal;
 };
 

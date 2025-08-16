@@ -75,7 +75,9 @@ private slots:
     void updateAvailableFilesystemsList();
     void onDirectorySelected(const std::string &path);
     void refreshTreeView();
-    
+    void on_actionFsCheckAndFix_triggered();
+    void on_actionCreateLostFound_triggered();
+
     // Override for drag and drop support
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;

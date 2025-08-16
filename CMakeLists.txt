@@ -18,6 +18,7 @@ add_executable(FileSystemUI
     src/core/filesystem.cpp
     src/core/journal.cpp
     src/core/fsck.cpp
+    src/core/fsck_fixes.cpp
     src/core/search.cpp
     src/core/quota.cpp
     src/core/snapshot.cpp
@@ -41,6 +42,7 @@ target_sources(FileSystemUI PRIVATE
     include/core/filesystem.h
     include/core/journal.h
     include/core/fsck.h
+    include/core/fsck_fixes.h
     include/core/search.h
     include/core/quota.h
     include/core/snapshot.h

@@ -197,6 +197,14 @@ void MainWindowFileOps::refreshFileList() {
         }
             
         // Get the inode and determine if it's a directory or file
+        if (!fs->is_valid_inode(entry.inode_num)) {
+            QListWidgetItem *item = new QListWidgetItem("[?] " + entryName + " (invalid inode)");
+            item->setData(Qt::UserRole, entry.inode_num);
+            item->setIcon(ui->fileListWidget->style()->standardIcon(QStyle::SP_FileIcon));
+            ui->fileListWidget->addItem(item);
+            continue;
+        }
+        
         Inode inode = fs->get_inode(entry.inode_num);
         bool isDirectory = (inode.mode == 2);
         QString prefix = isDirectory ? "[D] " : "[F] ";

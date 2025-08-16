@@ -868,3 +868,97 @@ bool FileSystem::is_valid_inode(int inode_num) const {
     
     return true;
 }
+
+// Fix an invalid block pointer in an inode
+void FileSystem::fix_invalid_block_pointer(int inode_num, int block_index) {
+    if (!is_valid_inode(inode_num)) {
+        std::cerr << "Error: Cannot fix invalid block pointer for invalid inode " << inode_num << std::endl;
+        return;
+    }
+    
+    // For direct blocks
+    if (block_index >= 0 && block_index < 10) {
+        inodes[inode_num].direct_blocks[block_index] = 0;
+        
+        // If this was the first invalid block, we might need to update the size
+        if (block_index == 0) {
+            inodes[inode_num].size = 0;
+        }
+    } 
+    // For indirect block
+    else if (block_index == 10) {
+        inodes[inode_num].indirect_block = 0;
+    }
+    
+    // Update inode times
+    update_inode_times(inode_num, false, true, false);
+    
+    // Write inodes back to disk
+    write_inodes();
+}
+
+// Fix an orphaned inode by adding it to lost+found
+void FileSystem::fix_orphaned_inode(int inode_num, int lost_found_inode) {
+    if (!is_valid_inode(inode_num) || !is_valid_inode(lost_found_inode)) {
+        std::cerr << "Error: Invalid inode numbers for fix_orphaned_inode" << std::endl;
+        return;
+    }
+    
+    // Create a name for the orphaned inode
+    std::string name = "#" + std::to_string(inode_num);
+    
+    // Add entry to lost+found
+    add_dir_entry(lost_found_inode, name, inode_num);
+    
+    // Update link count for the orphaned inode
+    inodes[inode_num].link_count++;
+    
+    // Update inode times
+    update_inode_times(inode_num, false, true, false);
+    update_inode_times(lost_found_inode, false, true, false);
+    
+    // Write inodes back to disk
+    write_inodes();
+}
+
+// Fix incorrect link count for an inode
+void FileSystem::fix_inode_link_count(int inode_num, int correct_count) {
+    if (!is_valid_inode(inode_num)) {
+        std::cerr << "Error: Cannot fix link count for invalid inode " << inode_num << std::endl;
+        return;
+    }
+    
+    inodes[inode_num].link_count = correct_count;
+    
+    // Update inode times
+    update_inode_times(inode_num, false, true, false);
+    
+    // Write inodes back to disk
+    write_inodes();
+}
+
+// Create lost+found directory if it doesn't exist
+int FileSystem::create_lost_found() {
+    // Check if lost+found already exists
+    int lost_found_inode = find_inode_by_path("/lost+found");
+    if (lost_found_inode != -1) {
+        return lost_found_inode;
+    }
+    
+    // Save current directory
+    int saved_dir = current_dir_inode;
+    
+    // Go to root directory
+    current_dir_inode = 0;
+    
+    // Create lost+found directory
+    mkdir("lost+found");
+    
+    // Find the inode for the new lost+found directory
+    lost_found_inode = find_inode_by_path("/lost+found");
+    
+    // Restore current directory
+    current_dir_inode = saved_dir;
+    
+    return lost_found_inode;
+}

@@ -358,26 +358,16 @@ void FileSystemCheck::fix_invalid_inode(int inode_num) {
 
 void FileSystemCheck::fix_orphaned_inode(int inode_num) {
     // For orphaned inodes, we'll move them to a "lost+found" directory
-    // First, ensure lost+found exists
-    int lost_found_inode = -1;
-    
-    // Look for lost+found in root directory
-    std::vector<DirEntry> root_entries = fs->get_dir_entries(0);
-    for (const auto& entry : root_entries) {
-        if (std::string(entry.name) == "lost+found") {
-            lost_found_inode = entry.inode_num;
-            break;
-        }
-    }
     
     // Create lost+found if it doesn't exist
-    if (lost_found_inode == -1) {
-        // We don't have a direct API to create a directory at a specific location
-        // In a real implementation, we would need additional methods
-        std::cout << "Would create lost+found directory and move orphaned inode " << inode_num << " there" << std::endl;
+    int lost_found_inode = fs->create_lost_found();
+    
+    if (lost_found_inode != -1) {
+        // Move the orphaned inode to lost+found
+        fs->fix_orphaned_inode(inode_num, lost_found_inode);
+        std::cout << "Moved orphaned inode " << inode_num << " to lost+found" << std::endl;
     } else {
-        // Add entry to lost+found
-        std::cout << "Would move orphaned inode " << inode_num << " to lost+found" << std::endl;
+        std::cerr << "Failed to create lost+found directory" << std::endl;
     }
 }
 
@@ -398,11 +388,13 @@ void FileSystemCheck::fix_directory_loop(int inode_num) {
 }
 
 void FileSystemCheck::fix_incorrect_link_count(int inode_num) {
-    // Fix link count by setting it to the actual count
-    std::cout << "Would fix link count for inode " << inode_num << " to " << inode_link_counts[inode_num] << std::endl;
+    // Use the new FileSystem method to fix the link count
+    fs->fix_inode_link_count(inode_num, inode_link_counts[inode_num]);
+    std::cout << "Fixed link count for inode " << inode_num << " to " << inode_link_counts[inode_num] << std::endl;
 }
 
 void FileSystemCheck::fix_invalid_block_pointer(int inode_num, int block_index) {
-    // Set invalid block pointer to 0
-    std::cout << "Would fix invalid block pointer in inode " << inode_num << " at index " << block_index << std::endl;
+    // Use the new FileSystem method to fix the invalid block pointer
+    fs->fix_invalid_block_pointer(inode_num, block_index);
+    std::cout << "Fixed invalid block pointer in inode " << inode_num << " at index " << block_index << std::endl;
 }

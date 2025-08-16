@@ -3,6 +3,7 @@
 #include "ui/filesystem_mount_dialog.h"
 #include "ui/mainwindow_file_ops.h"
 #include "ui/mainwindow_dialogs.h"
+#include "core/fsck_fixes.h"
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QListWidgetItem>
@@ -23,6 +24,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QDebug>
+#include <QProgressDialog>
 
 // Forward declarations for the file operations and dialogs handlers
 static std::unique_ptr<MainWindowFileOps> fileOps;
@@ -110,10 +112,38 @@ void MainWindow::setupMenus()
     // Already done in the UI file
 }
 
-void MainWindow::setupFsToolbar()
-{
+void MainWindow::setupFsToolbar() {
     ui->fsToolBar->setIconSize(QSize(24, 24));
     ui->fsToolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    
+    // Setup Tools menu
+    QMenu* toolsMenu = ui->menubar->addMenu("Tools");
+    
+    QAction* fsCheckAction = new QAction("Check Filesystem", this);
+    connect(fsCheckAction, &QAction::triggered, this, &MainWindow::on_actionFsCheck_triggered);
+    toolsMenu->addAction(fsCheckAction);
+    
+    QAction* fsCheckFixAction = new QAction("Check and Fix Filesystem", this);
+    connect(fsCheckFixAction, &QAction::triggered, this, &MainWindow::on_actionFsCheckAndFix_triggered);
+    toolsMenu->addAction(fsCheckFixAction);
+    
+    QAction* lostFoundAction = new QAction("Create lost+found Directory", this);
+    connect(lostFoundAction, &QAction::triggered, this, &MainWindow::on_actionCreateLostFound_triggered);
+    toolsMenu->addAction(lostFoundAction);
+    
+    toolsMenu->addSeparator();
+    
+    QAction* searchAction = new QAction("Advanced Search", this);
+    connect(searchAction, &QAction::triggered, this, &MainWindow::on_actionSearch_triggered);
+    toolsMenu->addAction(searchAction);
+    
+    QAction* quotaAction = new QAction("Quota Manager", this);
+    connect(quotaAction, &QAction::triggered, this, &MainWindow::on_actionQuotaManager_triggered);
+    toolsMenu->addAction(quotaAction);
+    
+    QAction* snapshotAction = new QAction("Snapshot Manager", this);
+    connect(snapshotAction, &QAction::triggered, this, &MainWindow::on_actionSnapshots_triggered);
+    toolsMenu->addAction(snapshotAction);
 }
 
 void MainWindow::refreshFileList()
@@ -275,4 +305,77 @@ void MainWindow::dropEvent(QDropEvent *event)
 
 void MainWindow::updateStatusBar(const QString &message) {
     ui->statusbar->showMessage(message, 5000); // Show for 5 seconds
+}
+
+void MainWindow::on_actionFsCheckAndFix_triggered() {
+    if (!fs) {
+        QMessageBox::warning(this, "Error", "No filesystem is mounted.");
+        return;
+    }
+    
+    QMessageBox::StandardButton reply = QMessageBox::question(this, 
+        "Check and Fix Filesystem", 
+        "This will check the filesystem for errors and attempt to fix them. Continue?",
+        QMessageBox::Yes | QMessageBox::No);
+        
+    if (reply == QMessageBox::Yes) {
+        // Create a progress dialog
+        QProgressDialog progress("Checking filesystem...", "Cancel", 0, 100, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.show();
+        
+        // Run the check
+        fsck = std::make_unique<FileSystemCheck>(fs.get());
+        std::vector<FsckIssue> issues = fsck->check();
+        
+        progress.setValue(50);
+        
+        // Fix issues if any were found
+        if (!issues.empty()) {
+            progress.setLabelText("Fixing filesystem issues...");
+            
+            // Fix all issues
+            fsck->fix_all_issues();
+            
+            // Format report message
+            QString report = QString("Fixed %1 filesystem issues:\n").arg(issues.size());
+            for (const auto& issue : issues) {
+                QString type;
+                switch (issue.type) {
+                    case FsckIssueType::INVALID_INODE: type = "Invalid inode"; break;
+                    case FsckIssueType::ORPHANED_INODE: type = "Orphaned inode"; break;
+                    case FsckIssueType::DUPLICATE_BLOCK: type = "Duplicate block"; break;
+                    case FsckIssueType::UNREFERENCED_BLOCK: type = "Unreferenced block"; break;
+                    case FsckIssueType::DIRECTORY_LOOP: type = "Directory loop"; break;
+                    case FsckIssueType::INCORRECT_LINK_COUNT: type = "Incorrect link count"; break;
+                    case FsckIssueType::INVALID_BLOCK_POINTER: type = "Invalid block pointer"; break;
+                }
+                report += QString("- %1: %2\n").arg(type).arg(QString::fromStdString(issue.description));
+            }
+            
+            progress.setValue(100);
+            
+            // Show the report
+            QMessageBox::information(this, "Filesystem Fixed", report);
+        } else {
+            progress.setValue(100);
+            QMessageBox::information(this, "Filesystem Check", "No issues found in the filesystem.");
+        }
+    }
+}
+
+void MainWindow::on_actionCreateLostFound_triggered() {
+    if (!fs) {
+        QMessageBox::warning(this, "Error", "No filesystem is mounted.");
+        return;
+    }
+    
+    int lostFoundInode = fs->create_lost_found();
+    
+    if (lostFoundInode != -1) {
+        QMessageBox::information(this, "Success", "Created or verified lost+found directory.");
+        refreshFileList();
+    } else {
+        QMessageBox::warning(this, "Error", "Failed to create lost+found directory.");
+    }
 }
