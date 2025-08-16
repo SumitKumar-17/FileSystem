@@ -2,7 +2,9 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
-#include <algorithm> 
+#include <algorithm>
+#include <dirent.h> // For directory operations
+#include <sys/stat.h> // For file stats
 FileSystem::FileSystem(const std::string& name) : disk_name(name), current_dir_inode(0), journal(nullptr) {}
 
 FileSystem::~FileSystem() {
@@ -81,6 +83,54 @@ int FileSystem::find_free_inode() {
 
 std::vector<DirEntry> FileSystem::get_dir_entries(int inode_num) {
     std::vector<DirEntry> entries;
+    
+    // Check if this is an external filesystem (mounted path, not .fs file)
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    
+    if (is_external) {
+        // For external filesystems, we'll use system calls to get real directory contents
+        // Add . and .. entries
+        DirEntry dot_entry;
+        strncpy(dot_entry.name, ".", MAX_FILENAME_LENGTH);
+        dot_entry.inode_num = current_dir_inode;
+        entries.push_back(dot_entry);
+        
+        DirEntry dotdot_entry;
+        strncpy(dotdot_entry.name, "..", MAX_FILENAME_LENGTH);
+        dotdot_entry.inode_num = (current_dir_inode == 0) ? 0 : 1; // Root's parent is itself
+        entries.push_back(dotdot_entry);
+        
+        // Get the current path in the external filesystem
+        std::string current_path = disk_name;
+        // TODO: Track current path relative to mount point
+        
+        // Use system's dirent to list directory contents
+        DIR* dir;
+        struct dirent* entry;
+        
+        if ((dir = opendir(current_path.c_str())) != nullptr) {
+            int entry_inode = 2; // Start assigning fake inodes from 2
+            
+            while ((entry = readdir(dir)) != nullptr) {
+                // Skip . and .. as we've already added them
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                    continue;
+                }
+                
+                DirEntry fs_entry;
+                strncpy(fs_entry.name, entry->d_name, MAX_FILENAME_LENGTH);
+                fs_entry.inode_num = entry_inode++; // Assign a fake inode number
+                
+                entries.push_back(fs_entry);
+            }
+            
+            closedir(dir);
+        }
+        
+        return entries;
+    }
+    
+    // Original implementation for our virtual filesystem
     if (inode_num < 0 || inode_num >= NUM_INODES || inodes[inode_num].mode != 2) {
         return entries;
     }
@@ -188,18 +238,58 @@ void FileSystem::format() {
 }
 
 bool FileSystem::mount() {
-    disk.open(disk_name, std::ios::in | std::ios::out | std::ios::binary);
-    if (!disk.is_open()) {
-        return false;
+    // Check if this is an external filesystem (mounted path, not .fs file)
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    
+    if (is_external) {
+        // For external filesystems, we don't actually open the disk image
+        // Instead, we'll use system operations to interact with the real filesystem
+        disk.close(); // Just in case it was open before
+        
+        // Check if the path exists
+        std::ifstream test_path(disk_name);
+        if (!test_path.good()) {
+            std::cerr << "External path doesn't exist or is not accessible: " << disk_name << std::endl;
+            return false;
+        }
+        
+        // Initialize dummy superblock and inodes for external filesystem
+        sb.num_blocks = NUM_BLOCKS; // Use dummy values
+        sb.num_inodes = NUM_INODES;
+        sb.inode_blocks = (NUM_INODES * sizeof(Inode) + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        
+        // Initialize the inodes array with dummy values
+        inodes.resize(NUM_INODES);
+        
+        // Set up root directory
+        inodes[0].mode = 040755; // drwxr-xr-x
+        inodes[0].size = BLOCK_SIZE;
+        inodes[0].uid = 1000; // Default user
+        inodes[0].gid = 1000; // Default group
+        inodes[0].link_count = 2; // . and ..
+        inodes[0].creation_time = inodes[0].modification_time = inodes[0].access_time = time(nullptr);
+        
+        // No need for journal on external filesystem
+        journal = nullptr;
+        current_dir_inode = 0; // Root directory
+        
+        std::cout << "Mounted external filesystem at: " << disk_name << std::endl;
+        return true;
+    } else {
+        // Regular .fs file handling
+        disk.open(disk_name, std::ios::in | std::ios::out | std::ios::binary);
+        if (!disk.is_open()) {
+            return false;
+        }
+        read_superblock();
+        read_inodes();
+        int journal_start_block = 1 + sb.inode_blocks;
+        int journal_num_blocks = 100;
+        journal = new Journal(this, journal_start_block, journal_num_blocks);
+        journal->recover();
+        current_dir_inode = 0; // Root directory
+        return true;
     }
-    read_superblock();
-    read_inodes();
-    int journal_start_block = 1 + sb.inode_blocks;
-    int journal_num_blocks = 100;
-    journal = new Journal(this, journal_start_block, journal_num_blocks);
-    journal->recover();
-    current_dir_inode = 0; // Root directory
-    return true;
 }
 
 void FileSystem::unmount() {
@@ -245,6 +335,44 @@ std::vector<DirEntry> FileSystem::ls() {
 }
 
 void FileSystem::cd(const std::string& path) {
+    // Check if this is an external filesystem
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    
+    if (is_external) {
+        // For external filesystems, we track a current path relative to the mount point
+        std::string full_path;
+        
+        if (path == "..") {
+            // Go up one directory
+            size_t last_slash = disk_name.find_last_of('/');
+            if (last_slash != std::string::npos && last_slash > 0) {
+                full_path = disk_name.substr(0, last_slash);
+            } else {
+                full_path = disk_name; // Stay at root if already at root
+            }
+        } else if (path == ".") {
+            // Stay in current directory
+            full_path = disk_name;
+        } else if (path[0] == '/') {
+            // Absolute path
+            full_path = path;
+        } else {
+            // Relative path
+            full_path = disk_name + "/" + path;
+        }
+        
+        // Check if the directory exists
+        DIR* dir = opendir(full_path.c_str());
+        if (dir != nullptr) {
+            closedir(dir);
+            disk_name = full_path;
+        } else {
+            std::cerr << "Cannot change to directory: " << full_path << std::endl;
+        }
+        return;
+    }
+    
+    // Original implementation for virtual filesystem
     int inode_num = find_inode_by_path(path);
     if (inode_num != -1 && inodes[inode_num].mode == 2) {
         current_dir_inode = inode_num;
@@ -254,6 +382,34 @@ void FileSystem::cd(const std::string& path) {
 }
 
 int FileSystem::find_inode_by_path(const std::string& path) {
+    // Check if this is an external filesystem
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    
+    if (is_external) {
+        // For external filesystems, verify the path exists
+        std::string full_path;
+        
+        if (path == ".") {
+            return 0; // Current directory
+        } else if (path == "..") {
+            return 1; // Parent directory
+        } else if (path[0] == '/') {
+            full_path = path; // Absolute path
+        } else {
+            full_path = disk_name + "/" + path; // Relative path
+        }
+        
+        // Check if file/directory exists
+        struct stat path_stat;
+        if (stat(full_path.c_str(), &path_stat) == 0) {
+            // Return fake inode number
+            // We'll use 0 for current dir, 1 for parent, and incrementing for others
+            return 2; // Simple implementation for now
+        }
+        return -1; // Not found
+    }
+    
+    // Original implementation for virtual filesystem
     if (path.empty()) return -1;
 
     std::stringstream ss(path);
@@ -580,6 +736,34 @@ void FileSystem::unlink(const std::string& path) {
 
 
 Inode FileSystem::get_inode(int inode_num) const {
+    // Check if this is an external filesystem
+    bool is_external = (disk_name.find(".fs") == std::string::npos && disk_name.find("/") == 0);
+    
+    if (is_external) {
+        // For external filesystems, create a fake inode based on the path
+        Inode fake_inode;
+        
+        // Default to directory for simplicity
+        fake_inode.mode = 2; // Directory
+        
+        if (inode_num == 0) {
+            // Current directory
+            struct stat st;
+            if (stat(disk_name.c_str(), &st) == 0) {
+                fake_inode.mode = S_ISDIR(st.st_mode) ? 2 : 1; // 2 for dir, 1 for file
+                fake_inode.size = st.st_size;
+                fake_inode.uid = st.st_uid;
+                fake_inode.gid = st.st_gid;
+                fake_inode.creation_time = st.st_ctime;
+                fake_inode.modification_time = st.st_mtime;
+                fake_inode.access_time = st.st_atime;
+            }
+        }
+        
+        return fake_inode;
+    }
+    
+    // Original implementation for virtual filesystem
     if (inode_num >= 0 && inode_num < NUM_INODES) {
         return inodes[inode_num];
     }

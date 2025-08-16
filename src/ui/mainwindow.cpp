@@ -388,16 +388,84 @@ void MainWindow::on_fileListWidget_customContextMenuRequested(const QPoint &pos)
 
 void MainWindow::checkAvailableFilesystems()
 {
-    // In a real implementation, this would scan the system for available filesystem images
-    // For this demo, we'll look for *.fs files in the current directory
+    QStringList fileList;
+    
+    // First, look for *.fs files in the current directory
     QDir dir(".");
     QStringList filters;
     filters << "*.fs";
-    QStringList fileList = dir.entryList(filters, QDir::Files);
+    fileList = dir.entryList(filters, QDir::Files);
     
     // Log the current directory and files found
     qDebug() << "Checking for filesystems in directory: " << QDir::currentPath();
-    qDebug() << "Found files: " << fileList;
+    qDebug() << "Found local fs files: " << fileList;
+    
+    // Now check for mounted filesystems
+    QStringList externalDrives;
+    
+    // Common mount points for external drives on Linux
+    QStringList mountPaths = {"/media", "/mnt", "/run/media/" + QString(qgetenv("USER"))};
+    
+    // Check each mount point for drives
+    for (const QString &mountPath : mountPaths) {
+        QDir mountDir(mountPath);
+        if (mountDir.exists()) {
+            // First level - usually user name on some distros
+            QStringList entries = mountDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QString &entry : entries) {
+                QDir subDir(mountPath + "/" + entry);
+                // Second level - the actual devices on some distros
+                QStringList devices = subDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+                for (const QString &device : devices) {
+                    externalDrives << mountPath + "/" + entry + "/" + device;
+                }
+                // Also add first level (for systems that mount directly to /media/devicename)
+                externalDrives << mountPath + "/" + entry;
+            }
+        }
+    }
+    
+    // Add to the file list with a special prefix to identify as external drive
+    for (const QString &drive : externalDrives) {
+        QFileInfo driveInfo(drive);
+        if (driveInfo.exists() && driveInfo.isReadable()) {
+            fileList << "EXTERNAL:" + drive;
+            qDebug() << "Found external drive: " << drive;
+        }
+    }
+    
+    // Check /proc/mounts to find all mounted filesystems
+    QFile mountsFile("/proc/mounts");
+    if (mountsFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&mountsFile);
+        QString line;
+        while (in.readLineInto(&line)) {
+            QStringList parts = line.split(" ");
+            if (parts.size() >= 2) {
+                QString devicePath = parts[0];
+                QString mountPoint = parts[1];
+                
+                // Skip system mounts, only interested in user-mountable devices
+                if (devicePath.startsWith("/dev/sd") || 
+                    devicePath.startsWith("/dev/nvme") || 
+                    devicePath.startsWith("/dev/usb") ||
+                    devicePath.contains("UUID=")) {
+                    
+                    // Add to the list with a special prefix
+                    if (!externalDrives.contains(mountPoint) && 
+                        !mountPoint.startsWith("/boot") &&
+                        !mountPoint.startsWith("/snap") &&
+                        !mountPoint.startsWith("/var") &&
+                        mountPoint != "/" && 
+                        QFileInfo(mountPoint).exists()) {
+                        fileList << "EXTERNAL:" + mountPoint;
+                        qDebug() << "Found mounted filesystem: " << devicePath << "at" << mountPoint;
+                    }
+                }
+            }
+        }
+        mountsFile.close();
+    }
     
     // Update only if the list has changed
     if (fileList != availableFilesystems) {
@@ -410,10 +478,34 @@ void MainWindow::updateAvailableFilesystemsList()
 {
     // If we have detected new filesystems, show a notification
     if (!availableFilesystems.isEmpty() && fs && !fs->mount()) {
-        QMessageBox::information(this, "Filesystems Detected", 
-                               "New filesystem images have been detected.\n"
-                               "Would you like to mount one of them?",
+        int numExternal = 0;
+        int numLocal = 0;
+        
+        // Count different types of filesystems
+        for (const QString &item : availableFilesystems) {
+            if (item.startsWith("EXTERNAL:")) {
+                numExternal++;
+            } else {
+                numLocal++;
+            }
+        }
+        
+        QString message = "Filesystems detected:\n";
+        if (numLocal > 0) {
+            message += QString("- %1 local filesystem image(s)\n").arg(numLocal);
+        }
+        if (numExternal > 0) {
+            message += QString("- %1 external drive(s)\n").arg(numExternal);
+        }
+        message += "\nWould you like to mount one of them?";
+        
+        QMessageBox::StandardButton reply = QMessageBox::information(this, "Filesystems Detected", 
+                               message,
                                QMessageBox::Yes | QMessageBox::No);
+                               
+        if (reply == QMessageBox::Yes) {
+            on_actionDetectFilesystems_triggered();
+        }
     }
 }
 
@@ -424,9 +516,9 @@ void MainWindow::on_actionDetectFilesystems_triggered()
     if (availableFilesystems.isEmpty()) {
         QString currentDir = QDir::currentPath();
         QMessageBox::information(this, "No Filesystems Found", 
-                               "No filesystem images (*.fs) were found in the current directory:\n" + 
-                               currentDir + "\n\n" +
-                               "The default filesystem 'my_virtual_disk.fs' should be available after formatting.");
+                               QString("No filesystem images (*.fs) or external drives were found.\n"
+                               "Current directory: %1\n\n"
+                               "The default filesystem 'my_virtual_disk.fs' should be available after formatting.").arg(currentDir));
                                
         // Check if our default filesystem exists
         QFileInfo check_file("my_virtual_disk.fs");
@@ -438,19 +530,62 @@ void MainWindow::on_actionDetectFilesystems_triggered()
         return;
     }
     
-    // Show dialog to select filesystem
-    bool ok;
-    QString item = QInputDialog::getItem(this, "Select Filesystem", 
-                                       "Available Filesystems:", 
-                                       availableFilesystems, 0, false, &ok);
-    if (ok && !item.isEmpty()) {
+    // Create a nicer selection dialog with readable names for external drives
+    QDialog dialog(this);
+    dialog.setWindowTitle("Select Filesystem");
+    dialog.setMinimumWidth(400);
+    
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    QLabel *label = new QLabel("Available Filesystems:", &dialog);
+    layout->addWidget(label);
+    
+    QListWidget *fsListWidget = new QListWidget(&dialog);
+    layout->addWidget(fsListWidget);
+    
+    // Add items with readable names
+    for (const QString &fs : availableFilesystems) {
+        QListWidgetItem *item = nullptr;
+        
+        if (fs.startsWith("EXTERNAL:")) {
+            QString path = fs.mid(9); // Remove "EXTERNAL:" prefix
+            QString displayName = "External: " + QFileInfo(path).fileName();
+            item = new QListWidgetItem(QIcon(style()->standardIcon(QStyle::SP_DriveHDIcon)), displayName);
+            item->setData(Qt::UserRole, fs);
+        } else {
+            item = new QListWidgetItem(QIcon(style()->standardIcon(QStyle::SP_FileIcon)), fs);
+            item->setData(Qt::UserRole, fs);
+        }
+        
+        fsListWidget->addItem(item);
+    }
+    
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    layout->addWidget(buttonBox);
+    
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    
+    if (dialog.exec() == QDialog::Accepted && fsListWidget->currentItem()) {
+        QString item = fsListWidget->currentItem()->data(Qt::UserRole).toString();
+        
         // Unmount current if mounted
         if (fs) {
             fs->unmount();
         }
         
-        // Create new filesystem with selected image
-        fs = std::make_unique<FileSystem>(item.toStdString());
+        // Check if it's an external drive
+        if (item.startsWith("EXTERNAL:")) {
+            QString externalPath = item.mid(9); // Remove "EXTERNAL:" prefix
+            QMessageBox::information(this, "External Drive Selected", 
+                                  "You've selected an external drive at: " + externalPath + "\n"
+                                  "This will be mounted directly from your system. Please ensure you have the necessary permissions.");
+            
+            // Create new filesystem with the actual path
+            fs = std::make_unique<FileSystem>(externalPath.toStdString());
+        } else {
+            // Regular .fs file
+            fs = std::make_unique<FileSystem>(item.toStdString());
+        }
         
         // Try to mount
         if (fs->mount()) {
@@ -1107,9 +1242,14 @@ void MainWindow::dropEvent(QDropEvent *event)
                         // Create the file in our filesystem
                         fs->create(fileInfo.fileName().toStdString());
                         fs->write(fileInfo.fileName().toStdString(), std::string(fileData.constData(), fileData.size()));
+                        
+                        qDebug() << "Imported file: " << filePath << " (Size: " << fileData.size() << " bytes)";
                     }
+                } else if (fileInfo.isDir()) {
+                    // For directories, we could implement recursive directory import
+                    QMessageBox::information(this, "Directory Import", 
+                                         "Directory import is not yet implemented: " + filePath);
                 }
-                // Could add directory import support here
             }
         }
         
