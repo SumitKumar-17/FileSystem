@@ -2,9 +2,9 @@
 #define SEARCH_H
 
 #include "filesystem.h"
-#include <vector>
-#include <string>
 #include <functional>
+#include <string>
+#include <vector>
 
 enum class SearchCriteriaType {
     NAME,
@@ -32,28 +32,29 @@ struct SearchResult {
 };
 
 class FileSystemSearch {
-private:
-    FileSystem* fs;
+  private:
+    FileSystem *fs;
     std::vector<SearchCriteria> criteria;
-    
-    bool match_criteria(const Inode& inode, const std::string& name, const std::string& path);
-    void search_directory(int dir_inode, const std::string& current_path, std::vector<SearchResult>& results);
 
-public:
-    FileSystemSearch(FileSystem* fs);
-    
+    bool match_criteria(const Inode &inode, const std::string &name, const std::string &path);
+    void search_directory(int dir_inode, const std::string &current_path,
+                          std::vector<SearchResult> &results);
+
+  public:
+    FileSystemSearch(FileSystem *fs);
+
     // Add search criteria
-    void add_name_criteria(const std::string& name);
+    void add_name_criteria(const std::string &name);
     void add_size_greater_than(int size);
     void add_size_less_than(int size);
     void add_modified_after(time_t time);
     void add_modified_before(time_t time);
-    void add_file_type(const std::string& type); // "file", "dir", "symlink"
+    void add_file_type(const std::string &type); // "file", "dir", "symlink"
     void add_permission(int perm);
-    
+
     // Execute search
     std::vector<SearchResult> search();
-    
+
     // Clear all criteria
     void clear_criteria();
 };

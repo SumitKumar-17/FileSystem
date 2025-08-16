@@ -1,0 +1,24 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+BreakBeforeBraces: Attach
+IndentCaseLabels: true
+SpaceBeforeParens: ControlStatements
+SpacesInParentheses: false
+AlignTrailingComments: true
+BreakBeforeBinaryOperators: None
+ColumnLimit: 100
+IndentPPDirectives: None
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+IndentWrappedFunctionNames: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakAfterReturnType: None
+ContinuationIndentWidth: 4
+PointerAlignment: Right
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1

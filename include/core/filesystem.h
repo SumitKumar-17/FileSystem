@@ -1,11 +1,11 @@
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 
+#include "journal.h"
+#include <ctime>
+#include <fstream>
 #include <string>
 #include <vector>
-#include <fstream>
-#include <ctime>
-#include "journal.h"
 
 // Constants for our file system
 const int BLOCK_SIZE = 512;
@@ -24,8 +24,8 @@ struct Superblock {
 // Inode structure
 struct Inode {
     int mode; // Permissions and file type (e.g., regular file, directory)
-    int uid; // User ID
-    int gid; // Group ID
+    int uid;  // User ID
+    int gid;  // Group ID
     int size;
     int link_count;
     time_t creation_time;
@@ -43,15 +43,15 @@ struct DirEntry {
 };
 
 class FileSystem {
-private:
+  private:
     std::fstream disk;
     std::string disk_name;
     Superblock sb;
     std::vector<Inode> inodes;
     int current_dir_inode;
-    Journal* journal;
+    Journal *journal;
 
-    void write_block(int block_num, const char* data);
+    void write_block(int block_num, const char *data);
     void write_superblock();
     void read_superblock();
     void write_inodes();
@@ -59,47 +59,47 @@ private:
     int allocate_block();
     void free_block(int block_num);
     int find_free_inode();
-    void add_dir_entry(int dir_inode_num, const std::string& name, int new_inode_num);
+    void add_dir_entry(int dir_inode_num, const std::string &name, int new_inode_num);
     void update_inode_times(int inode_num, bool access, bool modify, bool create);
 
-public:
-    FileSystem(const std::string& name);
+  public:
+    FileSystem(const std::string &name);
     ~FileSystem();
 
     void format();
     bool mount();
     void unmount();
-    void mkdir(const std::string& dirname);
+    void mkdir(const std::string &dirname);
     std::vector<DirEntry> get_dir_entries(int inode_num);
     std::vector<DirEntry> ls();
-    void cd(const std::string& path);
-    int find_inode_by_path(const std::string& path);
-    void create(const std::string& filename);
-    void write(const std::string& filename, const std::string& data);
-    std::string read(const std::string& filename);
-    void chmod(const std::string& path, int mode);
-    void chown(const std::string& path, int uid, int gid);
-    void link(const std::string& oldpath, const std::string& newpath);
-    void symlink(const std::string& target, const std::string& linkpath);
-    void unlink(const std::string& path);
-    
+    void cd(const std::string &path);
+    int find_inode_by_path(const std::string &path);
+    void create(const std::string &filename);
+    void write(const std::string &filename, const std::string &data);
+    std::string read(const std::string &filename);
+    void chmod(const std::string &path, int mode);
+    void chown(const std::string &path, int uid, int gid);
+    void link(const std::string &oldpath, const std::string &newpath);
+    void symlink(const std::string &target, const std::string &linkpath);
+    void unlink(const std::string &path);
+
     Inode get_inode(int inode_num) const;
-    
+
     /**
      * @brief Check if an inode number is valid
      * @param inode_num The inode number to check
      * @return True if the inode number is valid
      */
     bool is_valid_inode(int inode_num) const;
-    
+
     // Allow DiskUsageWidget to read blocks
-    void read_block(int block_num, char* data);
+    void read_block(int block_num, char *data);
 
     // Methods for filesystem maintenance
     void fix_invalid_block_pointer(int inode_num, int block_index);
     void fix_orphaned_inode(int inode_num, int lost_found_inode);
     void fix_inode_link_count(int inode_num, int correct_count);
-    
+
     // Create lost+found directory if it doesn't exist
     int create_lost_found();
 
